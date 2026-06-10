@@ -89,7 +89,7 @@ def grade_one(con, q, student_sql, schema_only):
         return "STALE_TABLE"
     try:
         s_cols, s_rows = run(con, student_sql)
-    except duckdb.BinderException:
+    except (duckdb.BinderException, duckdb.CatalogException):
         return "BINDER_ERROR"
     except duckdb.Error:
         return "EXEC_ERROR"
