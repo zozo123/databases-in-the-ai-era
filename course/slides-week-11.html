@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Week 11 Slides: Memory Is a Database Problem — DATA 2027</title>
+<meta name="theme-color" content="#f6f1e7">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23f6f1e7'/%3E%3Cellipse cx='50' cy='28' rx='30' ry='12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 28v44c0 6.6 13.4 12 30 12s30-5.4 30-12V28' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 50c0 6.6 13.4 12 30 12s30-5.4 30-12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,600;9..144,900&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="deck.css">
+</head>
+<body data-week="WEEK 11">
+
+<!-- 1: title -->
+<section class="slide title-slide">
+  <div class="slide-kicker">DATA 2027 · Week 11 · Part III — Semantics, Agents, Governance</div>
+  <h1>Memory Is a <em>Database</em> Problem</h1>
+  <p class="sub">Every agent memory system shipped since 2023 is a storage engine wearing a trench coat. This week we take the coat off and grade what’s underneath.</p>
+  <p class="course-line">Lecture 1 — Agent memory systems, read as database designs · Lecture 2 — Temporal knowledge, consolidation, and forgetting</p>
+</section>
+
+<!-- 2: L1 divider -->
+<section class="slide section-slide">
+  <div class="slide-kicker">Lecture 1 · Tuesday</div>
+  <h2>Agent Memory Systems, Read as Database Designs</h2>
+  <p>Strip the branding off any memory product and you find a workload spec.</p>
+</section>
+
+<!-- 3 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · The Workload</div>
+  <h2>Four requirements, no branding</h2>
+  <div class="body">
+    <ul>
+      <li><b>Episodic append</b> — cheap, sequential, never blocks the response.</li>
+      <li><b>Semantic recall</b> — “what do I know that bears on this?”</li>
+      <li><b>Namespace isolation</b> — leaks between users are privacy breaches.</li>
+      <li><b>Cheap point reads</b> — timezone lookups cost microseconds, not embeddings.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 4 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · The Workload</div>
+  <h2>You learned these in week two</h2>
+  <div class="body"><div class="cols">
+    <ul>
+      <li>Episodic append → <b>sequential append</b></li>
+      <li>Semantic recall → <b>secondary indexes</b></li>
+    </ul>
+    <ul>
+      <li>Namespace isolation → <b>multi-tenancy</b></li>
+      <li>Point reads → <b>primary-key lookup</b></li>
+    </ul>
+  </div>
+  <p>The physics didn’t change. The client did.</p>
+  </div>
+</section>
+
+<!-- 5: big number -->
+<section class="slide">
+  <div class="slide-kicker">L1 · The Workload</div>
+  <h2>Writes are not the hard part</h2>
+  <div class="body">
+    <div class="big">~200k</div>
+    <p class="big-label">episodic appends/day for a support agent at 10k conversations × 20 turns — trivial; a single Postgres instance yawns at it. The hard part is recall on every turn.</p>
+  </div>
+</section>
+
+<!-- 6: big number -->
+<section class="slide">
+  <div class="slide-kicker">L1 · The Workload</div>
+  <h2>Why you must index</h2>
+  <div class="body">
+    <div class="big">17s → 1.4s</div>
+    <p class="big-label">p95 end-to-end latency: full-history replay vs. retrieval over distilled memories on LOCOMO-length conversations (Mem0 paper) — with &gt;90% fewer tokens billed. Not an optimization; the difference between a product and a demo.</p>
+  </div>
+</section>
+
+<!-- 7 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Semantic Recall</div>
+  <h2>Recall means hybrid retrieval</h2>
+  <div class="body">
+    <ul>
+      <li><b>Vector similarity</b> — catches paraphrase.</li>
+      <li><b>BM25</b> — exact tokens: error codes, invoice numbers.</li>
+      <li><b>Graph traversal</b> — multi-hop: “who manages this service’s owner?”</li>
+      <li>Once you can’t scan, you index — then decide what the index is <b>over</b>.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 8: Mem0 pipeline figure -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Mem0</div>
+  <h2>Mem0: an LLM-driven upsert pipeline</h2>
+  <div class="body">
+    <figure>
+      <svg viewBox="0 0 800 360" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Mem0 two-phase write path: extraction then consolidation">
+        <rect x="0" y="0" width="800" height="360" fill="#efe8d8"/>
+        <!-- episode in -->
+        <rect x="30" y="140" width="150" height="70" fill="none" stroke="#1d1a15" stroke-width="2.5" rx="4" transform="rotate(-0.5 105 175)"/>
+        <text x="50" y="170" font-family="monospace" font-size="14" fill="#1d1a15">new turn +</text>
+        <text x="50" y="190" font-family="monospace" font-size="14" fill="#1d1a15">rolling summary</text>
+        <path d="M182 175 C 200 173, 212 176, 226 174" stroke="#93321b" stroke-width="2" fill="none"/>
+        <path d="M216 168 L 229 174 L 215 181" stroke="#93321b" stroke-width="2" fill="none"/>
+        <!-- extraction -->
+        <rect x="232" y="130" width="170" height="90" fill="none" stroke="#93321b" stroke-width="2.5" rx="4" transform="rotate(0.4 317 175)"/>
+        <text x="252" y="162" font-family="monospace" font-size="14" fill="#93321b">1 · EXTRACT</text>
+        <text x="252" y="184" font-family="monospace" font-size="13" fill="#1d1a15">LLM emits short</text>
+        <text x="252" y="202" font-family="monospace" font-size="13" fill="#1d1a15">candidate facts</text>
+        <path d="M404 175 C 422 177, 434 173, 448 175" stroke="#93321b" stroke-width="2" fill="none"/>
+        <path d="M438 169 L 451 175 L 437 182" stroke="#93321b" stroke-width="2" fill="none"/>
+        <!-- consolidation -->
+        <rect x="454" y="130" width="190" height="90" fill="none" stroke="#93321b" stroke-width="2.5" rx="4" transform="rotate(-0.4 549 175)"/>
+        <text x="474" y="162" font-family="monospace" font-size="14" fill="#93321b">2 · CONSOLIDATE</text>
+        <text x="474" y="184" font-family="monospace" font-size="13" fill="#1d1a15">retrieve similar,</text>
+        <text x="474" y="202" font-family="monospace" font-size="13" fill="#1d1a15">LLM picks an op</text>
+        <path d="M646 175 C 662 173, 674 177, 688 175" stroke="#93321b" stroke-width="2" fill="none"/>
+        <path d="M678 169 L 691 175 L 677 182" stroke="#93321b" stroke-width="2" fill="none"/>
+        <!-- ops -->
+        <text x="698" y="130" font-family="monospace" font-size="15" fill="#1d1a15">ADD</text>
+        <text x="698" y="160" font-family="monospace" font-size="15" fill="#1d1a15">UPDATE</text>
+        <text x="698" y="190" font-family="monospace" font-size="15" fill="#1d1a15">DELETE</text>
+        <text x="698" y="220" font-family="monospace" font-size="15" fill="#93321b">NOOP</text>
+        <!-- annotation -->
+        <text x="232" y="280" font-family="monospace" font-size="14" fill="#93321b">= a CDC upsert resolver, with an LLM as the comparator</text>
+        <text x="232" y="304" font-family="monospace" font-size="13" fill="#1d1a15">index over extracted facts, not raw transcript</text>
+      </svg>
+      <figcaption>Mem0 (arXiv 2504.19413) write path: extraction, then consolidation choosing ADD / UPDATE / DELETE / NOOP.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- 9: big number -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Mem0</div>
+  <h2>The payoff is real</h2>
+  <div class="body">
+    <div class="big">+26%</div>
+    <p class="big-label">relative improvement over OpenAI’s built-in memory on LOCOMO question answering (LLM-as-judge). The graph variant Mem0ᵍ adds a couple more points on temporal and multi-hop questions.</p>
+  </div>
+</section>
+
+<!-- 10 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Mem0</div>
+  <h2>Now grade it as a database</h2>
+  <div class="body">
+    <ul>
+      <li><b>Durability:</b> facts the extractor skips were never written.</li>
+      <li>There is no redo log for attention.</li>
+      <li><b>Determinism:</b> same transcript twice → different stores.</li>
+      <li><b>Audit:</b> <code>UPDATE</code> keeps no tombstone, no before-image, no provenance.</li>
+      <li>All fixable — fact log, source citations, versioned writes.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 11 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · MemGPT</div>
+  <h2>MemGPT: the buffer pool, rediscovered</h2>
+  <div class="body"><div class="cols">
+    <ul>
+      <li><b>Main context</b> = RAM: scarce, fast, fixed-size.</li>
+      <li><b>External context</b>: recall + archival storage, unbounded.</li>
+      <li>Reachable only via model-issued function calls.</li>
+    </ul>
+    <ul>
+      <li>Main context = <b>buffer pool</b>.</li>
+      <li>Eviction-with-summary = <b>lossy page replacement</b>.</li>
+      <li>Warning at ~70% occupancy = <b>high-water mark flush</b>.</li>
+    </ul>
+  </div></div>
+</section>
+
+<!-- 12 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · MemGPT</div>
+  <h2>The application as its own buffer manager</h2>
+  <div class="body">
+    <ul>
+      <li>The genuinely novel move: <b>the model runs page replacement</b>, via tool calls.</li>
+      <li>DBAs spent thirty years learning why application-managed caching is hard.</li>
+      <li>Hint rot, working-set misestimation, no global view — all reappear.</li>
+      <li>Agents forget to page in and <b>confabulate instead of faulting</b>.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 13 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Field Note</div>
+  <h2>The eight-month primary key</h2>
+  <div class="body">
+    <ul>
+      <li>Sales agent kept calling a customer by his predecessor’s name.</li>
+      <li>Consolidation judged “new contact is Dana” a <code>NOOP</code> vs. “contact is Marcus.”</li>
+      <li>Similar embeddings, different truth.</li>
+      <li>The fix wasn’t a better prompt — it was a <b>unique constraint</b>.</li>
+      <li>One <code>contact_for(account)</code> per account; writes invalidate the old row.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 14: table -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Report Card</div>
+  <h2>Three systems, one rubric</h2>
+  <div class="body">
+    <table>
+      <thead><tr><th>Property</th><th>Mem0</th><th>MemGPT</th><th>Zep / Graphiti</th><th>A DBMS would say</th></tr></thead>
+      <tbody>
+        <tr><td><b>Write path</b></td><td>LLM extract → LLM upsert</td><td>Self-directed tool calls</td><td>Edges into temporal graph</td><td>Log first, derive later</td></tr>
+        <tr><td><b>Read path</b></td><td>Vector top-k over facts</td><td>Model-issued search</td><td>Cosine + BM25 + graph</td><td>Optimizer picks the path</td></tr>
+        <tr><td><b>Durability</b></td><td>Lossy at extraction</td><td>Lossy at eviction</td><td>Edges invalidated, kept</td><td>WAL or it didn’t happen</td></tr>
+        <tr><td><b>Audit</b></td><td>Overwrites destroy history</td><td>Edits unversioned</td><td>Bi-temporal lineage</td><td>Every version <code>AS OF</code></td></tr>
+        <tr><td><b>Consistency</b></td><td>Async → stale reads</td><td>Serial until you shard</td><td>Summaries can lag</td><td>Define isolation, enforce it</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- 15: L2 divider -->
+<section class="slide section-slide">
+  <div class="slide-kicker">Lecture 2 · Thursday</div>
+  <h2>Temporal Knowledge, Consolidation, and Forgetting</h2>
+  <p>Mutable key–value memory is the wrong data model. The right one is from the 1990s.</p>
+</section>
+
+<!-- 16 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Temporal Model</div>
+  <h2>Facts are intervals, not values</h2>
+  <div class="body">
+    <ul>
+      <li>“Alice is on-call” was true <b>March 3 to March 17</b>.</li>
+      <li>When Bob takes over, the Alice-edge becomes <b>bounded</b>, not false.</li>
+      <li>Contradiction <b>closes intervals</b>; it never deletes rows.</li>
+      <li>The past stays queryable.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 17 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Graphiti</div>
+  <h2>Bi-temporal edges: two timelines per fact</h2>
+  <div class="body"><div class="cols">
+    <ul>
+      <li><b>Valid time</b>: <code>t_valid</code> / <code>t_invalid</code></li>
+      <li>When the fact held <b>in the world</b>.</li>
+    </ul>
+    <ul>
+      <li><b>Transaction time</b>: learned / superseded</li>
+      <li>The database’s own <b>epistemic history</b>.</li>
+    </ul>
+  </div>
+  <p>Textbook bi-temporality: Snodgrass’s TSQL2 (1995), standardized in SQL:2011.</p>
+  </div>
+</section>
+
+<!-- 18: figure -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Graphiti</div>
+  <h2>Contradiction as invalidation</h2>
+  <div class="body">
+    <figure>
+      <svg viewBox="0 0 800 360" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Bi-temporal edge timeline showing contradiction as invalidation">
+        <rect x="0" y="0" width="800" height="360" fill="#efe8d8"/>
+        <path d="M60 300 C 260 297, 540 302, 750 299" stroke="#1d1a15" stroke-width="2" fill="none"/>
+        <path d="M738 292 L 752 299 L 737 306" stroke="#1d1a15" stroke-width="2" fill="none"/>
+        <text x="700" y="330" font-family="monospace" font-size="14" fill="#1d1a15">time →</text>
+        <path d="M180 293 L 179 308" stroke="#1d1a15" stroke-width="2"/>
+        <text x="148" y="328" font-family="monospace" font-size="13" fill="#1d1a15">Mar 03</text>
+        <path d="M470 292 L 471 307" stroke="#1d1a15" stroke-width="2"/>
+        <text x="438" y="328" font-family="monospace" font-size="13" fill="#1d1a15">Mar 17</text>
+        <rect x="180" y="90" width="290" height="52" fill="none" stroke="#93321b" stroke-width="2.5" rx="4" transform="rotate(-0.4 325 116)"/>
+        <text x="200" y="113" font-family="monospace" font-size="14" fill="#1d1a15">contact_for(acme) = Marcus</text>
+        <text x="200" y="132" font-family="monospace" font-size="12" fill="#93321b">t_valid: Mar 03  t_invalid: Mar 17</text>
+        <path d="M470 84 L 470 148" stroke="#93321b" stroke-width="3" stroke-dasharray="6 4"/>
+        <text x="482" y="80" font-family="monospace" font-size="12" fill="#93321b">closed, not deleted</text>
+        <rect x="470" y="180" width="280" height="52" fill="none" stroke="#1d1a15" stroke-width="2.5" rx="4" transform="rotate(0.4 610 206)"/>
+        <text x="488" y="203" font-family="monospace" font-size="14" fill="#1d1a15">contact_for(acme) = Dana</text>
+        <text x="488" y="222" font-family="monospace" font-size="12" fill="#93321b">t_valid: Mar 17  t_invalid: ∅</text>
+        <path d="M520 178 C 505 160, 488 152, 474 146" stroke="#93321b" stroke-width="2" fill="none"/>
+        <path d="M484 144 L 472 144 L 478 156" stroke="#93321b" stroke-width="2" fill="none"/>
+        <text x="520" y="165" font-family="monospace" font-size="12" fill="#93321b">new edge invalidates old</text>
+        <path d="M320 60 L 320 86" stroke="#1d1a15" stroke-width="1.5" stroke-dasharray="3 4"/>
+        <text x="230" y="50" font-family="monospace" font-size="13" fill="#1d1a15">AS OF Mar 10 → Marcus</text>
+        <path d="M640 256 L 640 236" stroke="#1d1a15" stroke-width="1.5" stroke-dasharray="3 4"/>
+        <text x="560" y="276" font-family="monospace" font-size="13" fill="#1d1a15">AS OF now → Dana</text>
+      </svg>
+      <figcaption>The Dana edge closes the Marcus edge’s interval (t_invalid := Mar 17) but preserves the row; “current truth” is t_invalid IS NULL.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- 19 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Graphiti</div>
+  <h2>Three queries overwrite stores can’t answer</h2>
+  <div class="body">
+    <ul>
+      <li><b>What is true now</b> — filter <code>t_invalid IS NULL</code>.</li>
+      <li><b>What was true on April 2</b> — interval containment.</li>
+      <li><b>What did we believe on April 2</b> — transaction-time variant.</li>
+      <li>The last one determines <b>liability</b>: belief at action time.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 20: big number -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Graphiti</div>
+  <h2>Temporal structure pays rent</h2>
+  <div class="body">
+    <div class="big">94.8%</div>
+    <p class="big-label">Zep on Deep Memory Retrieval vs. MemGPT’s 93.4% — plus up to 18.5% accuracy gains on LongMemEval at ~90% lower latency than full-context baselines. It retrieves the right version of a fact.</p>
+  </div>
+</section>
+
+<!-- 21 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Prior Art</div>
+  <h2>The field did this in the 90s</h2>
+  <div class="body">
+    <ul>
+      <li>Kimball’s <b>Type-2 slowly-changing dimension</b>, circa 1996.</li>
+      <li>Expire the row, insert a successor; history joins <b>as it was</b>.</li>
+      <li>Graphiti = Type-2 SCD with an <b>LLM deciding row identity</b>.</li>
+      <li>Power: natural-language contradiction. Risk: <b>probabilistic expiry trigger</b>.</li>
+      <li>Ask vendors: which TSQL2 query classes? How do you coalesce intervals?</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 22 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Consolidation</div>
+  <h2>Consolidation is LSM compaction</h2>
+  <div class="body">
+    <ul>
+      <li>Raw episodes are <b>L0</b>: small, recent, overlapping, fast to write.</li>
+      <li>Background passes merge into deduplicated, contradiction-resolved runs.</li>
+      <li>Same design questions: when to compact, what it costs.</li>
+      <li>Here compaction cost is <b>LLM tokens</b> — a real dollar number.</li>
+      <li>Read amplification before vs. write amplification after.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 23 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Forgetting</div>
+  <h2>Forgetting is garbage collection</h2>
+  <div class="body">
+    <ul>
+      <li><b>TTL deletion</b> (“drop after 90 days”) is the blunt instrument.</li>
+      <li>Decay-scored eviction — <code>e^(−Δt/τ)</code> + use count — is generational GC.</li>
+      <li>Bi-temporal stores can forget <b>retrievability</b> without forgetting <b>the record</b>.</li>
+      <li>Exactly the split GDPR-era systems need.</li>
+      <li>Overwrite memories have one delete — and it destroys evidence.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 24: phantom figure -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Open Problem</div>
+  <h2>The semantic phantom</h2>
+  <div class="body">
+    <figure>
+      <svg viewBox="0 0 800 360" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Timeline of a semantic phantom: stale derived summary drives a wrong action">
+        <rect x="0" y="0" width="800" height="360" fill="#efe8d8"/>
+        <path d="M50 250 C 250 247, 550 252, 760 249" stroke="#1d1a15" stroke-width="2" fill="none"/>
+        <path d="M748 242 L 762 249 L 747 256" stroke="#1d1a15" stroke-width="2" fill="none"/>
+        <!-- 09:00 -->
+        <path d="M110 243 L 109 258" stroke="#1d1a15" stroke-width="2"/>
+        <text x="88" y="280" font-family="monospace" font-size="13" fill="#1d1a15">09:00</text>
+        <text x="60" y="180" font-family="monospace" font-size="13" fill="#1d1a15">summary: “contact is</text>
+        <text x="60" y="198" font-family="monospace" font-size="13" fill="#1d1a15">Marcus, renewal likely”</text>
+        <path d="M110 210 L 110 240" stroke="#1d1a15" stroke-width="1.5" stroke-dasharray="3 4"/>
+        <!-- 09:05 -->
+        <path d="M290 243 L 291 258" stroke="#93321b" stroke-width="2"/>
+        <text x="268" y="280" font-family="monospace" font-size="13" fill="#93321b">09:05</text>
+        <text x="240" y="100" font-family="monospace" font-size="13" fill="#1d1a15">episode: Marcus left.</text>
+        <text x="240" y="118" font-family="monospace" font-size="13" fill="#93321b">graph edge invalidated ✓</text>
+        <path d="M290 130 L 290 240" stroke="#93321b" stroke-width="1.5" stroke-dasharray="3 4"/>
+        <!-- 09:12 -->
+        <path d="M470 243 L 469 258" stroke="#93321b" stroke-width="2"/>
+        <text x="448" y="280" font-family="monospace" font-size="13" fill="#93321b">09:12</text>
+        <rect x="400" y="150" width="200" height="58" fill="none" stroke="#93321b" stroke-width="2.5" rx="4" transform="rotate(-0.5 500 179)"/>
+        <text x="416" y="174" font-family="monospace" font-size="13" fill="#93321b">agent reads STALE</text>
+        <text x="416" y="192" font-family="monospace" font-size="13" fill="#93321b">summary → emails Marcus</text>
+        <path d="M470 212 L 470 240" stroke="#93321b" stroke-width="1.5" stroke-dasharray="3 4"/>
+        <!-- 09:30 -->
+        <path d="M660 243 L 661 258" stroke="#1d1a15" stroke-width="2"/>
+        <text x="638" y="280" font-family="monospace" font-size="13" fill="#1d1a15">09:30</text>
+        <text x="600" y="100" font-family="monospace" font-size="13" fill="#1d1a15">lazy consolidation</text>
+        <text x="600" y="118" font-family="monospace" font-size="13" fill="#1d1a15">regenerates summary</text>
+        <path d="M660 130 L 660 240" stroke="#1d1a15" stroke-width="1.5" stroke-dasharray="3 4"/>
+        <text x="120" y="330" font-family="monospace" font-size="14" fill="#93321b">every base read was consistent — the action was still wrong</text>
+      </svg>
+      <figcaption>A belief matching no committed base fact stays readable because it lives in a derived representation — a phantom-read analogue.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- 25 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Open Problem</div>
+  <h2>Why no classical answer fits</h2>
+  <div class="body">
+    <ul>
+      <li><b>Sync maintenance</b> (materialized view): correct, but LLM on write path.</li>
+      <li><b>Snapshot semantics</b>: summaries declare an episode-LSN; nobody ships it.</li>
+      <li><b>OCC</b>: validate watermark before commit — but <b>actions can’t abort</b>.</li>
+      <li>You cannot unsend an email; abort must become <b>block before side effect</b>.</li>
+      <li>Dependency tracking + isolation level + agent architecture, all at once.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 26: quote -->
+<section class="slide quote-slide">
+  <div class="q">An agent that cannot say <b>why it believes something</b> is just a cache with opinions.</div>
+  <cite>— Week 11 lecture notes, DATA 2027</cite>
+</section>
+
+<!-- 27: checkpoint -->
+<section class="slide">
+  <div class="slide-kicker">Checkpoint · Discussion</div>
+  <h2>Before you leave</h2>
+  <div class="body">
+    <ul>
+      <li>Why can valid-time and transaction-time <code>AS OF</code> queries disagree for the same date?</li>
+      <li>Where exactly can Mem0 lose a fact despite a durable episode log?</li>
+      <li>Can belief-snapshot isolation kill semantic phantoms without a synchronous LLM write?</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 28: readings -->
+<section class="slide">
+  <div class="slide-kicker">Readings</div>
+  <h2>Read before Thursday</h2>
+  <div class="body">
+    <ul>
+      <li><b>Mem0</b> — Chhikara et al., arXiv:2504.19413. Read §3 as a write-path spec.</li>
+      <li><b>Zep</b> — Rasmussen et al., arXiv:2501.13956. Map t_valid/t_invalid onto SQL:2011.</li>
+      <li><b>MemGPT</b> — Packer et al., arXiv:2310.08560. Read the OS metaphor adversarially.</li>
+    </ul>
+  </div>
+</section>
+
+<script src="deck.js"></script>
+</body>
+</html>

@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Week 2 Slides: B-Trees, LSM-Trees &amp; the RUM Triangle — DATA 2027</title>
+<meta name="theme-color" content="#f6f1e7">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23f6f1e7'/%3E%3Cellipse cx='50' cy='28' rx='30' ry='12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 28v44c0 6.6 13.4 12 30 12s30-5.4 30-12V28' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 50c0 6.6 13.4 12 30 12s30-5.4 30-12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,600;9..144,900&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="deck.css">
+</head>
+<body data-week="WEEK 02">
+
+<!-- 1: title -->
+<section class="slide title-slide">
+  <div class="slide-kicker">DATA 2027 · Week 02 · Part I — Foundations Under New Workloads</div>
+  <h1>B-Trees, LSM-Trees &amp; the <em>RUM</em> Triangle</h1>
+  <p class="sub">Two storage architectures, three amplifications, and one triangle nobody has escaped.</p>
+  <p class="course-line">Lecture 1 — B-trees: the disk made me do it · Lecture 2 — LSM-trees and the amplification triangle</p>
+</section>
+
+<!-- 2: L1 divider -->
+<section class="slide section-slide">
+  <div class="slide-kicker">Lecture 1 · Tuesday</div>
+  <h2>B-trees: the disk made me do it</h2>
+  <p>The least clever data structure that takes the page seriously.</p>
+</section>
+
+<!-- 3 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · The problem</div>
+  <h2>Put a binary tree on disk. It dies.</h2>
+  <div class="body">
+    <ul>
+      <li>Balanced binary tree over 10⁹ keys: height ≈ <b>30</b>.</li>
+      <li>Every pointer chase is a potential device read.</li>
+      <li>Spinning disk, ~10 ms/seek: <b>300 ms</b> per lookup.</li>
+      <li>NVMe, ~80 µs: still <b>~2.4 ms</b>.</li>
+      <li>Each 4 KB page read used a 16-byte node — <b>0.4%</b> useful.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 4 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Fanout</div>
+  <h2>So fill the page</h2>
+  <div class="body">
+    <ul>
+      <li>Interior node = pure navigation: separator key + child pointer.</li>
+      <li>8-byte key + 8-byte pointer = 16 bytes/entry.</li>
+      <li>4 KB page → 4096 / 16 = <b>256 entries</b>.</li>
+      <li>Call it <b>~250-way fanout</b> after the header.</li>
+      <li>Height: log₂₅₀ 10⁹ ≈ 20.7 / 5.5 ≈ 3.8.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 5: big number -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Fanout</div>
+  <h2>A billion keys, this deep</h2>
+  <div class="body">
+    <div class="big">4</div>
+    <p class="big-label">levels instead of thirty — and levels 1–3 total 1 + 250 + 62,500 ≈ 63 k pages ≈ 250 MB, pinned in memory. A point lookup costs one device read: the leaf.</p>
+  </div>
+</section>
+
+<!-- 6 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Fanout</div>
+  <h2>What the math is sensitive to</h2>
+  <div class="body"><div class="cols">
+    <ul>
+      <li><b>Page size barely matters</b> — heights are logarithms, and logarithms are stubborn.</li>
+    </ul>
+    <ul>
+      <li><b>Key width matters a lot</b> — a 36-char key cuts fanout 3×.</li>
+      <li>Fix: <b>prefix truncation</b> — a separator only needs to sort between leaves.</li>
+    </ul>
+  </div></div>
+</section>
+
+<!-- 7: figure -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Page anatomy</div>
+  <h2>The slotted page</h2>
+  <div class="body">
+    <figure>
+      <svg viewBox="0 0 800 360" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Slotted page: header, slot array growing forward, free space, cells growing backward">
+        <rect x="0" y="0" width="800" height="360" fill="#efe8d8"/>
+        <rect x="50" y="110" width="700" height="120" fill="none" stroke="#1d1a15" stroke-width="2.5"/>
+        <rect x="50" y="110" width="80" height="120" fill="none" stroke="#1d1a15" stroke-width="2"/>
+        <text x="90" y="175" text-anchor="middle" font-family="monospace" font-size="14" fill="#1d1a15">hdr</text>
+        <rect x="130" y="110" width="60" height="120" fill="none" stroke="#93321b" stroke-width="2"/>
+        <text x="160" y="150" text-anchor="middle" font-family="monospace" font-size="13" fill="#93321b">s0</text>
+        <rect x="190" y="110" width="60" height="120" fill="none" stroke="#93321b" stroke-width="2"/>
+        <text x="220" y="150" text-anchor="middle" font-family="monospace" font-size="13" fill="#93321b">s1</text>
+        <rect x="250" y="110" width="60" height="120" fill="none" stroke="#93321b" stroke-width="2"/>
+        <text x="280" y="150" text-anchor="middle" font-family="monospace" font-size="13" fill="#93321b">s2</text>
+        <text x="430" y="175" text-anchor="middle" font-family="monospace" font-size="14" fill="#1d1a15">free space</text>
+        <rect x="550" y="110" width="80" height="120" fill="none" stroke="#1d1a15" stroke-width="2"/>
+        <text x="590" y="175" text-anchor="middle" font-family="monospace" font-size="13" fill="#1d1a15">cell C</text>
+        <rect x="630" y="110" width="60" height="120" fill="none" stroke="#1d1a15" stroke-width="2"/>
+        <text x="660" y="175" text-anchor="middle" font-family="monospace" font-size="13" fill="#1d1a15">B</text>
+        <rect x="690" y="110" width="60" height="120" fill="none" stroke="#1d1a15" stroke-width="2"/>
+        <text x="720" y="175" text-anchor="middle" font-family="monospace" font-size="13" fill="#1d1a15">A</text>
+        <path d="M160 230 C 200 290, 640 290, 660 232" fill="none" stroke="#93321b" stroke-width="1.8" stroke-dasharray="5 4"/>
+        <path d="M660 232 l-8 7 m8 -7 l-1 11" fill="none" stroke="#93321b" stroke-width="1.8" stroke-linecap="round"/>
+        <path d="M220 230 C 260 300, 690 300, 720 232" fill="none" stroke="#93321b" stroke-width="1.8" stroke-dasharray="5 4"/>
+        <path d="M720 232 l-8 7 m8 -7 l-1 11" fill="none" stroke="#93321b" stroke-width="1.8" stroke-linecap="round"/>
+        <path d="M280 230 C 320 280, 560 280, 588 232" fill="none" stroke="#93321b" stroke-width="1.8" stroke-dasharray="5 4"/>
+        <path d="M588 232 l-8 7 m8 -7 l-1 11" fill="none" stroke="#93321b" stroke-width="1.8" stroke-linecap="round"/>
+        <text x="130" y="92" font-family="monospace" font-size="14" fill="#93321b">slot array → (kept in key order)</text>
+        <text x="750" y="92" text-anchor="end" font-family="monospace" font-size="14" fill="#1d1a15">← cells (arrival order)</text>
+        <text x="400" y="340" text-anchor="middle" font-family="monospace" font-size="13" fill="#1d1a15">binary search runs over slots; records never move for a search</text>
+      </svg>
+      <figcaption>Fig. — Slotted page: slots grow forward, cells grow backward, free space in the middle. Each slot is a 2–4 byte offset.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- 8 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Page anatomy</div>
+  <h2>Indirection earns its keep</h2>
+  <div class="body">
+    <ul>
+      <li>External record identity = <b>(page #, slot #)</b>.</li>
+      <li>Engine shuffles cells freely within the page.</li>
+      <li>No secondary-index entry is ever invalidated.</li>
+      <li>Deletion marks a slot dead; page compacts lazily.</li>
+      <li>Every size-changing update survives on this two-level indirection.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 9 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Splits</div>
+  <h2>Growth only at the root</h2>
+  <div class="body">
+    <ul>
+      <li>Full leaf splits: half the entries move to a new page.</li>
+      <li>Separator pushed into the parent — which may split too.</li>
+      <li>The tree grows <b>only at the root</b>.</li>
+      <li>Balance is a side effect of the growth rule.</li>
+      <li>No rotations, no rebalancing pass, ever.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 10: big number -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Splits</div>
+  <h2>The equilibrium occupancy</h2>
+  <div class="body">
+    <div class="big">69%</div>
+    <p class="big-label">steady-state page occupancy under random inserts (ln 2) — a permanent ~1.44× space tax for being update-friendly. Monotonic keys + split-at-insertion-point cheat to ~100%-full pages.</p>
+  </div>
+</section>
+
+<!-- 11 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Splits</div>
+  <h2>Deletion is the embarrassing part</h2>
+  <div class="body">
+    <ul>
+      <li>Textbooks merge pages below half full.</li>
+      <li>Production engines mostly don’t — merging under concurrency is misery.</li>
+      <li>Pages drift sparse; cleanup is offline: <code>VACUUM</code>, <code>OPTIMIZE TABLE</code>.</li>
+      <li>Grew to 100 GB, shrank to 10 GB live? Still <b>100 GB on disk</b>.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 12 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Refinements</div>
+  <h2>B+-tree and B-link</h2>
+  <div class="body"><div class="cols">
+    <ul>
+      <li><b>B+-tree</b>: all records in leaves; interior nodes navigation-only.</li>
+      <li><b>Sibling pointers</b>: range scan descends once, walks right.</li>
+    </ul>
+    <ul>
+      <li><b>B-link</b> (Lehman–Yao): high key + right-link per node.</li>
+      <li>Readers racing a split just follow the link — no lock-coupling.</li>
+      <li>PostgreSQL’s nbtree <b>is</b> a B-link tree.</li>
+    </ul>
+  </div></div>
+</section>
+
+<!-- 13 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Field note</div>
+  <h2>Your key distribution is part of the engine</h2>
+  <div class="body">
+    <ul>
+      <li>Random UUIDv4 primary keys on InnoDB, write-heavy service.</li>
+      <li>Every insert dirtied a cold leaf: buffer pool thrashed.</li>
+      <li>Throughput collapsed to a few thousand rows/s.</li>
+      <li>Switch to UUIDv7/ULID: inserts confined to the right edge.</li>
+      <li><b>Throughput tripled</b> — nothing in the schema changed.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 14 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Crash safety</div>
+  <h2>Steal / no-force → WAL</h2>
+  <div class="body">
+    <ul>
+      <li><b>Steal</b>: evict dirty pages of uncommitted transactions? Yes.</li>
+      <li><b>No-force</b>: flush all dirty pages at commit? No.</li>
+      <li>Price: disk holds uncommitted changes, misses committed ones.</li>
+      <li>WAL rule 1: log before dirty page reaches disk (<b>undo</b>).</li>
+      <li>WAL rule 2: commit record durable before return (<b>redo</b>).</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 15 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Crash safety</div>
+  <h2>ARIES in three passes</h2>
+  <div class="body">
+    <ul>
+      <li>LSNs stamp pages → redo is <b>idempotent</b>.</li>
+      <li><b>Analysis</b>: reconstruct live transactions from a fuzzy checkpoint.</li>
+      <li><b>Redo</b>: repeat history exactly — including the losers.</li>
+      <li><b>Undo</b>: roll losers back, writing CLRs.</li>
+      <li>All this because B-trees mutate in place. Hold that thought.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 16: L2 divider -->
+<section class="slide section-slide">
+  <div class="slide-kicker">Lecture 2 · Thursday</div>
+  <h2>LSM-trees and the amplification triangle</h2>
+  <p>What if we never update in place at all?</p>
+</section>
+
+<!-- 17 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Inversion</div>
+  <h2>Invert every assumption</h2>
+  <div class="body">
+    <ul>
+      <li>Workload: ingest a firehose, occasionally look things up.</li>
+      <li>In-place writes become pure liability: random I/O, eviction fights.</li>
+      <li>O’Neil, Cheng, Gawlick &amp; O’Neil, 1996: <b>never update in place</b>.</li>
+      <li>Buffer in memory, dump immutable sorted runs, merge in background.</li>
+      <li>Under RocksDB, Cassandra, HBase — and most agent-memory stores.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 18 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Write path</div>
+  <h2>Memtables and SSTables</h2>
+  <div class="body">
+    <ul>
+      <li>Append to WAL (sequential, cheap), insert into <b>memtable</b> (skiplist).</li>
+      <li>At ~64 MB (RocksDB): freeze, write out as an <b>SSTable</b>.</li>
+      <li>SSTable: immutable, sorted, block index, min/max keys, Bloom filter.</li>
+      <li>Updates are newer versions; deletes are <b>tombstones</b>.</li>
+      <li>Tombstones survive until every older version is provably buried.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 19 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Read path</div>
+  <h2>Where the bill arrives</h2>
+  <div class="body">
+    <ul>
+      <li>Check memtable, then SSTables <b>newest to oldest</b>.</li>
+      <li>Newest version wins.</li>
+      <li>Untreated: one block read per run the key <em>might</em> be in.</li>
+      <li>Compaction, Bloom filters, RUM — all about managing this bill.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 20 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Compaction</div>
+  <h2>Size-tiered vs. leveled</h2>
+  <div class="body"><div class="cols">
+    <ul>
+      <li><b>Size-tiered</b>: merge ~4 similar-size runs into the next tier.</li>
+      <li>Each byte rewritten ~once per tier: <b>low write amp</b>.</li>
+      <li>Runs overlap freely → high read amp, ~2× transient space.</li>
+    </ul>
+    <ul>
+      <li><b>Leveled</b>: levels each T = 10× larger, non-overlapping within level.</li>
+      <li>≤ 1 version per key per level; SA ≈ 1 + 1/T ≈ 1.11.</li>
+      <li>Each descending byte drags <b>~T bytes of rewrite</b>.</li>
+    </ul>
+  </div></div>
+</section>
+
+<!-- 21 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · The ledger</div>
+  <h2>Define the three numbers precisely</h2>
+  <div class="body">
+    <ul>
+      <li><b>WA</b> = bytes physically written ÷ bytes logically written.</li>
+      <li><b>RA</b> = device reads per query ÷ reads logically needed.</li>
+      <li><b>SA</b> = bytes occupied ÷ bytes of live, unique data.</li>
+      <li>Vendors won’t define them. You must.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 22: big number -->
+<section class="slide">
+  <div class="slide-kicker">L2 · The ledger</div>
+  <h2>One byte’s life, leveled (T = 10, 4 levels)</h2>
+  <div class="body">
+    <div class="big">42</div>
+    <p class="big-label">write amplification ≈ 1 (WAL) + 1 (flush) + 10 × 4 (descents) — the folklore “~10× per level, 40–50× overall” is just this sum. Size-tiered, 3 tiers: WA ≈ 5.</p>
+  </div>
+</section>
+
+<!-- 23: big number -->
+<section class="slide">
+  <div class="slide-kicker">L2 · The ledger</div>
+  <h2>Now audit the B-tree the same way</h2>
+  <div class="body">
+    <div class="big">64</div>
+    <p class="big-label">B-tree WA for a 128-byte update: 4 KB leaf dirtied + full-page write in WAL = 8 KB for 128 bytes. The LSM often amplifies less, and sequentially — its sin is that the cost is deferred, bursty, and eats your p99.</p>
+  </div>
+</section>
+
+<!-- 24 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · The ledger</div>
+  <h2>RocksDB prints the bill on demand</h2>
+  <div class="body">
+    <pre><code>** Compaction Stats [default] **
+Level   Files  Size(GB)  Read(GB)  Write(GB)  W-Amp
+  L0     4/0      0.25       0.0       62.1    1.0
+  L1    10/1      0.62     601.7      598.9    9.6
+  L2    98/3      6.21     580.4      577.8    9.3
+  L3   940/8     62.05     551.2      549.0    8.9
+ Sum                      1733.3     1787.8   28.8</code></pre>
+    <p>Friday’s lab: predict the W-Amp column before you run it.</p>
+  </div>
+</section>
+
+<!-- 25 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Bloom filters</div>
+  <h2>Buying back the reads</h2>
+  <div class="body">
+    <ul>
+      <li>m bits, k hashes; false positives only, never false negatives.</li>
+      <li>FPR ≈ (1 − e^(−kn/m))^k, minimized at k = (m/n)·ln 2.</li>
+      <li>Standard 10 bits/key: k = 7, <b>FPR ≈ 0.8%</b>.</li>
+      <li>Expected reads ≈ 1 + 0.008 × (runs − 1).</li>
+      <li>Twelve-run nightmare collapses to <b>~1.1 reads</b>. Best deal in systems.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 26 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Bloom filters</div>
+  <h2>The limitation that returns in week 6</h2>
+  <div class="body">
+    <ul>
+      <li>A Bloom filter answers “is key X in this file?”</li>
+      <li>It cannot answer “does anything in [a, b) live here?”</li>
+      <li><b>Range scans get no help</b> — every overlapping run consulted.</li>
+      <li>“Memories similar to this embedding” isn’t even a range.</li>
+      <li><b>There is no Bloom filter for meaning.</b></li>
+    </ul>
+  </div>
+</section>
+
+<!-- 27: RUM figure -->
+<section class="slide">
+  <div class="slide-kicker">L2 · RUM</div>
+  <h2>The RUM triangle</h2>
+  <div class="body">
+    <figure>
+      <svg viewBox="0 0 800 360" preserveAspectRatio="xMidYMid meet" role="img" aria-label="The RUM triangle with B-tree, leveled LSM, size-tiered LSM, and the agent workload pulled between two corners">
+        <rect x="0" y="0" width="800" height="360" fill="#efe8d8"/>
+        <path d="M400 52 C 310 134, 218 222, 124 306" fill="none" stroke="#1d1a15" stroke-width="2.5" stroke-linecap="round"/>
+        <path d="M400 52 C 492 136, 584 220, 678 302" fill="none" stroke="#1d1a15" stroke-width="2.5" stroke-linecap="round"/>
+        <path d="M124 306 C 308 300, 494 304, 678 302" fill="none" stroke="#1d1a15" stroke-width="2.5" stroke-linecap="round"/>
+        <text x="400" y="34" text-anchor="middle" font-family="monospace" font-size="15" fill="#93321b">READ-OPTIMIZED</text>
+        <text x="118" y="332" text-anchor="start" font-family="monospace" font-size="15" fill="#93321b">WRITE-OPTIMIZED</text>
+        <text x="682" y="328" text-anchor="end" font-family="monospace" font-size="15" fill="#93321b">SPACE-OPTIMIZED</text>
+        <circle cx="412" cy="118" r="6" fill="#93321b"/>
+        <text x="430" y="123" font-family="monospace" font-size="13" fill="#1d1a15">b+tree (1 I/O reads, 69% pages)</text>
+        <circle cx="488" cy="240" r="6" fill="#93321b"/>
+        <text x="504" y="245" font-family="monospace" font-size="13" fill="#1d1a15">lsm, leveled (sa~1.1, wa~40)</text>
+        <circle cx="208" cy="276" r="6" fill="#93321b"/>
+        <text x="224" y="281" font-family="monospace" font-size="13" fill="#1d1a15">lsm, size-tiered (wa~5)</text>
+        <circle cx="330" cy="196" r="7" fill="none" stroke="#93321b" stroke-width="2.5" stroke-dasharray="3 3"/>
+        <text x="348" y="188" font-family="monospace" font-size="13" fill="#93321b">agent memory: wants R and U,</text>
+        <text x="348" y="206" font-family="monospace" font-size="13" fill="#93321b">never deletes. awkward.</text>
+        <path d="M330 184 C 348 156, 372 110, 392 66" fill="none" stroke="#93321b" stroke-width="1.8" stroke-dasharray="6 5"/>
+        <path d="M392 66 l-10 4 m10 -4 l-2 11" fill="none" stroke="#93321b" stroke-width="1.8" stroke-linecap="round"/>
+        <path d="M318 204 C 268 234, 196 270, 142 298" fill="none" stroke="#93321b" stroke-width="1.8" stroke-dasharray="6 5"/>
+        <path d="M142 298 l11 -1 m-11 1 l8 -8" fill="none" stroke="#93321b" stroke-width="1.8" stroke-linecap="round"/>
+      </svg>
+      <figcaption>Fig. 2.1 — The RUM conjecture (Athanassoulis et al., EDBT 2016): optimize two overheads toward their minimum and the third moves away. A conjecture, not a theorem — but nobody has bought all three corners in thirty years.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- 28 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · RUM</div>
+  <h2>The corner agents sit on</h2>
+  <div class="body">
+    <ul>
+      <li><b>Ingest</b>: millions of small appends/hour, never updated in place.</li>
+      <li><b>Recall</b>: semantic top-k over all history — Bloom filters are spectators.</li>
+      <li><b>Space</b>: agents almost never delete; memory is the product.</li>
+      <li>Most “AI memory” = LSM + vector index: chose U, pays R at query time.</li>
+      <li>Week 6 adds <b>recall</b> quality — triangle becomes a tetrahedron.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 29: table -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Scorecard</div>
+  <h2>Memorize the shape, not the digits</h2>
+  <div class="body">
+    <table>
+      <thead>
+        <tr><th>Dimension</th><th>B+-tree</th><th>LSM leveled</th><th>LSM size-tiered</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><b>Write amp</b></td><td>~30–60×, random</td><td>≈ 40–50×, sequential</td><td>≈ 5×, sequential</td></tr>
+        <tr><td><b>Point reads</b></td><td>1 I/O</td><td>≈ 1 I/O w/ Bloom</td><td>≈ 1.1 I/O w/ Bloom</td></tr>
+        <tr><td><b>Range scans</b></td><td>excellent</td><td>good, no Bloom help</td><td>poor, no Bloom help</td></tr>
+        <tr><td><b>Space amp</b></td><td>~1.44×</td><td>≈ 1.1×</td><td>up to ~2× transient</td></tr>
+        <tr><td><b>Concurrency</b></td><td>latching, lock coupling</td><td colspan="2">immutable SSTables; cost moves to compaction stalls</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- 30: quote -->
+<section class="slide quote-slide">
+  <div class="q">You don’t choose whether to amplify. You choose <b>which</b> amplification to confess to — and the workload audits you.</div>
+  <cite>— Week 2 notes</cite>
+</section>
+
+<!-- 31: checkpoint -->
+<section class="slide">
+  <div class="slide-kicker">Checkpoint · Discussion</div>
+  <h2>Before you leave</h2>
+  <div class="body">
+    <ul>
+      <li>Redo the fanout math for 16 KB InnoDB pages with UUIDv4 keys — why does your DBA mutter about surrogate keys?</li>
+      <li>200 GB/day of agent memories, leveled T = 10, four levels: does a 7.68 TB SSD at 3 DWPD survive?</li>
+      <li>Recall scans the newest 30 days: which compaction policy wins, and why don’t Bloom filters appear in your answer?</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 32: readings -->
+<section class="slide">
+  <div class="slide-kicker">Readings</div>
+  <h2>Read before Thursday</h2>
+  <div class="body">
+    <ul>
+      <li><b><em>Database Internals</em></b>, ch. 2–4 &amp; 7 — Petrov, O’Reilly 2019. Redo the fanout math for 16 KB pages.</li>
+      <li><b>The RUM Conjecture</b> — Athanassoulis et al., EDBT 2016. Which corner did your last system silently choose?</li>
+      <li><b>The LSM-Tree</b> — O’Neil et al., Acta Informatica 1996, §1–3. Which HDD-era assumptions did flash break?</li>
+    </ul>
+  </div>
+</section>
+
+<script src="deck.js"></script>
+</body>
+</html>

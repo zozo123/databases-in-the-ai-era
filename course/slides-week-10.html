@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Week 10 Slides: Semantic Operators — DATA 2027</title>
+<meta name="theme-color" content="#f6f1e7">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23f6f1e7'/%3E%3Cellipse cx='50' cy='28' rx='30' ry='12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 28v44c0 6.6 13.4 12 30 12s30-5.4 30-12V28' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 50c0 6.6 13.4 12 30 12s30-5.4 30-12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,600;9..144,900&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="deck.css">
+</head>
+<body data-week="WEEK 10">
+
+<!-- 1: title -->
+<section class="slide title-slide">
+  <div class="slide-kicker">DATA 2027 · Week 10 · Part III — Semantics, Agents, Governance</div>
+  <h1>Semantic <em>Operators</em></h1>
+  <p class="sub">The predicate becomes English, the evaluator becomes a language model, and the optimizer must reason about plans that cost dollars and are sometimes wrong.</p>
+  <p class="course-line">Lecture 1 — sem_filter, sem_join: relational algebra meets the model · Lecture 2 — Optimizing pipelines that cost dollars and lie</p>
+</section>
+
+<!-- 2: L1 divider -->
+<section class="slide section-slide">
+  <div class="slide-kicker">Lecture 1 · Tuesday</div>
+  <h2>sem_filter, sem_join: relational algebra meets the model</h2>
+  <p>Codd’s separation of what from how — now with English predicates.</p>
+</section>
+
+<!-- 3 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · The Bet</div>
+  <h2>What is a semantic operator?</h2>
+  <div class="body">
+    <ul>
+      <li>Declarative transformation over relations, parameterized by <b>natural language</b>.</li>
+      <li>Physical implementation happens to involve LLM invocations.</li>
+      <li>Semantics defined against a <b>reference judgment</b>, not a model.</li>
+      <li>Plus a <b>statistical accuracy target</b>.</li>
+      <li>Result: rewrites, cost models, cardinality estimation come back online.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 4 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · The Operator Zoo</div>
+  <h2>Four operators carry the weight</h2>
+  <div class="body">
+    <ul>
+      <li><code>sem_filter(R, p)</code> — tuples where an English predicate holds.</li>
+      <li><code>sem_join(R, S, p)</code> — pairs (r, s) satisfying a language predicate.</li>
+      <li><code>sem_agg(R, q)</code> — many-to-one reduction: summarize, synthesize, answer.</li>
+      <li><code>sem_topk(R, q, k)</code> — rank by a language criterion, return top k.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 5 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · The Operator Zoo</div>
+  <h2>Implementation quirks worth knowing</h2>
+  <div class="body">
+    <ul>
+      <li><code>sem_agg</code>: fold or hierarchical tree — groups rarely fit one context window.</li>
+      <li><code>sem_topk</code>: LLMs are <b>miscalibrated absolute scorers</b>.</li>
+      <li>So: pairwise or listwise comparisons into a tournament network.</li>
+      <li>Call complexity: <b>O(n log n) comparisons</b>, not O(n) scores.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 6 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · The Contract</div>
+  <h2>What the contract does <em>not</em> promise: determinism</h2>
+  <div class="body">
+    <ul>
+      <li>Run a sem_filter twice — you may get different rows.</li>
+      <li>Honest semantics: output is a <b>sample from a distribution</b> over relations.</li>
+      <li>Even eventual consistency converged to a unique value. This never does.</li>
+      <li>Promise instead: <b>bounded disagreement</b> with the reference.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 7 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · A Real Pipeline</div>
+  <h2>A LOTUS pipeline you can write</h2>
+  <div class="body">
+<pre><code>claims = papers.sem_filter(
+    "the abstract {abstract} explicitly claims results "
+    "that are reproducible with released code"
+)                                # 10,000 → ~1,800 survive
+
+matched = claims.sem_join(
+    datasets,                    # 500 benchmark rows
+    "paper {abstract:left} reports results on the "
+    "benchmark {name:right} ({description:right})"
+)                                # 1,800 × 500 pairs?!
+
+digest = (matched
+    .sem_topk("most rigorous experimental methodology",
+              K=5, group_by=["name"])
+    .sem_agg("write a 3-sentence reproducibility summary",
+             group_by=["name"]))</code></pre>
+  </div>
+</section>
+
+<!-- 8: big number -->
+<section class="slide">
+  <div class="slide-kicker">L1 · The Cost Shock</div>
+  <h2>That join, executed naively</h2>
+  <div class="body">
+    <div class="big">900,000</div>
+    <p class="big-label">model calls: 1,800 × 500 pairs. ~500 input tokens each at $3/M → about $1,400 and several GPU-days of latency for one join.</p>
+  </div>
+</section>
+
+<!-- 9 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · The Cost Shock</div>
+  <h2>The algebra transplanted. The cost model didn’t.</h2>
+  <div class="body">
+    <ul>
+      <li>Joins are quadratic — that part Selinger knew.</li>
+      <li>Model calls: <b>5–9 orders of magnitude</b> pricier than boolean predicates.</li>
+      <li>Selinger budgeted predicates at fractions of a microsecond.</li>
+      <li>Now every evaluation has a unit price printed on it.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 10 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Cascades</div>
+  <h2>Cheap models propose, expensive models dispose</h2>
+  <div class="body">
+    <ul>
+      <li>Older than LLMs: <b>Viola–Jones</b> (2001), multi-stage search rankers.</li>
+      <li>Proxy scores every candidate; two thresholds τ⁻ &lt; τ⁺.</li>
+      <li>Below τ⁻: reject. Above τ⁺: accept. Middle band → <b>oracle</b>.</li>
+      <li>sem_filter proxy: small model’s log-probability on “True.”</li>
+      <li>sem_join proxy: embed once — <b>O(n+m)</b>, not O(n·m) — cosine similarity.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 11: figure -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Cascades</div>
+  <h2>Anatomy of a sem_join cascade</h2>
+  <div class="body">
+    <figure>
+      <svg viewBox="0 0 800 360" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Cascade: candidate pairs flow through a proxy scorer and split into accept, oracle, and reject paths">
+        <rect x="28" y="140" width="158" height="80" fill="none" stroke="#1d1a15" stroke-width="2.5" rx="3"/>
+        <text x="107" y="174" font-family="monospace" font-size="14" fill="#1d1a15" text-anchor="middle">n &#215; m</text>
+        <text x="107" y="196" font-family="monospace" font-size="14" fill="#1d1a15" text-anchor="middle">candidate pairs</text>
+        <path d="M186 180 L246 180" stroke="#1d1a15" stroke-width="2.5" fill="none"/>
+        <path d="M238 174 L250 180 L238 186" stroke="#1d1a15" stroke-width="2.5" fill="none"/>
+        <rect x="252" y="132" width="180" height="96" fill="none" stroke="#93321b" stroke-width="3" rx="3"/>
+        <text x="342" y="168" font-family="monospace" font-size="14" fill="#93321b" text-anchor="middle">PROXY</text>
+        <text x="342" y="190" font-family="monospace" font-size="13" fill="#1d1a15" text-anchor="middle">cosine(e_r, e_s)</text>
+        <text x="342" y="210" font-family="monospace" font-size="13" fill="#1d1a15" text-anchor="middle">~$0.04 total</text>
+        <path d="M432 156 C500 110, 540 86, 596 70" stroke="#1d1a15" stroke-width="2.5" fill="none"/>
+        <path d="M585 67 L600 69 L590 80" stroke="#1d1a15" stroke-width="2.5" fill="none"/>
+        <text x="500" y="92" font-family="monospace" font-size="13" fill="#1d1a15">s &gt; &#964;&#8314;</text>
+        <path d="M432 180 L596 180" stroke="#93321b" stroke-width="2.5" fill="none"/>
+        <path d="M588 174 L600 180 L588 186" stroke="#93321b" stroke-width="2.5" fill="none"/>
+        <text x="478" y="170" font-family="monospace" font-size="13" fill="#93321b">&#964;&#8315; &#8804; s &#8804; &#964;&#8314;</text>
+        <path d="M432 204 C500 250, 540 274, 596 290" stroke="#1d1a15" stroke-width="2.5" fill="none"/>
+        <path d="M590 280 L600 291 L585 293" stroke="#1d1a15" stroke-width="2.5" fill="none"/>
+        <text x="500" y="278" font-family="monospace" font-size="13" fill="#1d1a15">s &lt; &#964;&#8315;</text>
+        <rect x="604" y="40" width="168" height="56" fill="none" stroke="#1d1a15" stroke-width="2.5" rx="3"/>
+        <text x="688" y="74" font-family="monospace" font-size="14" fill="#1d1a15" text-anchor="middle">ACCEPT (free)</text>
+        <rect x="604" y="148" width="168" height="64" fill="none" stroke="#93321b" stroke-width="3" rx="3"/>
+        <text x="688" y="176" font-family="monospace" font-size="14" fill="#93321b" text-anchor="middle">ORACLE LLM</text>
+        <text x="688" y="198" font-family="monospace" font-size="13" fill="#1d1a15" text-anchor="middle">~2% of pairs</text>
+        <rect x="604" y="264" width="168" height="56" fill="none" stroke="#1d1a15" stroke-width="2.5" rx="3"/>
+        <text x="688" y="298" font-family="monospace" font-size="14" fill="#1d1a15" text-anchor="middle">REJECT (free)</text>
+        <text x="40" y="326" font-family="monospace" font-size="13" fill="#93321b">&#964;&#8315;, &#964;&#8314; calibrated on a labeled sample:</text>
+        <text x="40" y="346" font-family="monospace" font-size="13" fill="#1d1a15">P(precision &#8805; p* and recall &#8805; r*) &#8805; 1 &#8722; &#948;</text>
+      </svg>
+      <figcaption>Fig. 10.1 — The proxy scores all n×m pairs for pennies; only the uncertain band pays for a frontier-model verdict.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- 12 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Guarantees</div>
+  <h2>Thresholds are not vibes: the SUPG recipe</h2>
+  <div class="body">
+    <ul>
+      <li>Oracle-label a sample; pick τ⁻, τ⁺ from it.</li>
+      <li>Guarantee: recall ≥ r* and precision ≥ p*, probability ≥ 1−δ.</li>
+      <li>Importance-weighted sampling concentrates labels near the decision boundary.</li>
+      <li>SLA-ready: <b>“90% recall at 95% confidence.”</b></li>
+      <li>Garbage proxy? Band widens — you pay more, never silently answer worse.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 13: table -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Worked Numbers</div>
+  <h2>Costing the join honestly</h2>
+  <div class="body">
+    <table>
+      <thead><tr><th>Plan component</th><th>Cost</th></tr></thead>
+      <tbody>
+        <tr><td>Naive: 900K pairs × ~500 tokens at $3/M</td><td><b>~$1,400</b></td></tr>
+        <tr><td>Embed 1,800 + 500 rows (~575K tokens at $0.02/M)</td><td>$0.012</td></tr>
+        <tr><td>Oracle-label 1,000 calibration pairs</td><td>$1.55</td></tr>
+        <tr><td>Oracle on ~20,000 uncertain pairs (2.2% band)</td><td>~$30</td></tr>
+        <tr><td>Cascade total — with a certified recall floor</td><td><b>~$32</b></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- 14: big number -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Worked Numbers</div>
+  <h2>The default you must justify deviating from</h2>
+  <div class="body">
+    <div class="big">44&#215;</div>
+    <p class="big-label">cost reduction: ~$32 vs $1,400 — and latency drops from days to minutes, since embedding is two batched calls and the oracle pass parallelizes.</p>
+  </div>
+</section>
+
+<!-- 15: big number -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Field Note</div>
+  <h2>“It’s just a join”</h2>
+  <div class="body">
+    <div class="big">$19,000</div>
+    <p class="big-label">one uncascaded sem_join: 40K tickets × 800 known issues = 32M model calls, four days of rate limiting. The afternoon fix — embeddings + a 3% oracle band — reran for $410.</p>
+  </div>
+</section>
+
+<!-- 16: L2 divider -->
+<section class="slide section-slide">
+  <div class="slide-kicker">Lecture 2 · Thursday</div>
+  <h2>Optimizing pipelines that cost dollars and lie</h2>
+  <p>The System R question, asked again: who picks the plan?</p>
+</section>
+
+<!-- 17 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · The New Problem</div>
+  <h2>Three axes, one optimizer</h2>
+  <div class="body">
+    <ul>
+      <li>1979: dynamic program over join orders, one scalar cost.</li>
+      <li>2025: plans vary in <b>runtime, dollars, and quality</b> at once.</li>
+      <li>Quality can’t be bought back after the fact.</li>
+      <li>Palimpzest (CIDR 2025): declare a pipeline <b>and a policy</b>.</li>
+      <li>“Maximize quality subject to cost ≤ $50,” or the reverse.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 18: table -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Physical Plan Space</div>
+  <h2>One logical filter, five physical operators</h2>
+  <div class="body">
+    <table>
+      <thead><tr><th>Implementation (10K rows)</th><th>Cost</th><th>Latency</th><th>Quality</th></tr></thead>
+      <tbody>
+        <tr><td>Frontier model, chain-of-thought</td><td>~$95</td><td>hours</td><td>1.00 (reference)</td></tr>
+        <tr><td>Mid-tier model, terse prompt</td><td>~$6</td><td>~20 min</td><td>0.93</td></tr>
+        <tr><td>Cascade: embedding → frontier on 3%</td><td>~$3.20</td><td>~10 min</td><td>0.95 (floor 0.90)</td></tr>
+        <tr><td>Three filters fused, one mid-tier call</td><td>~$2.50/filter</td><td>~20 min</td><td>0.88</td></tr>
+        <tr><td>Code synthesis: frontier writes a classifier</td><td>~$0.40 total</td><td>seconds</td><td>0.71</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- 19 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Physical Plan Space</div>
+  <h2>No row dominates — that’s the whole story</h2>
+  <div class="body">
+    <ul>
+      <li>Tuesday’s cascade is <b>just one physical operator</b> here.</li>
+      <li>Fusion amortizes per-call token overhead — at quality cost (interference).</li>
+      <li>Code synthesis: great on lexical predicates, bad on judgment.</li>
+      <li>No single number without asking <b>what the user values</b>.</li>
+      <li>Hence: the policy is part of the query.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 20 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Optimizer Theory</div>
+  <h2>Why System R’s dynamic programming breaks</h2>
+  <div class="body">
+    <ul>
+      <li>Principle of optimality needs costs <b>totally ordered</b>.</li>
+      <li>(cost, accuracy) is a <b>partial order</b>: incomparable subplans exist.</li>
+      <li>Cheap-but-sloppy subplan may prefix the globally best plan.</li>
+      <li>Downstream operators may tolerate — even mask — its errors.</li>
+      <li>Prune it at the memo table: optimum gone.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 21: figure -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Optimizer Theory</div>
+  <h2>Memoize the frontier, not a winner</h2>
+  <div class="body">
+    <figure>
+      <svg viewBox="0 0 800 360" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Cost versus quality scatter of the five physical operators with the Pareto frontier drawn through undominated points">
+        <path d="M80 30 L80 310 L760 310" stroke="#1d1a15" stroke-width="2.5" fill="none"/>
+        <text x="420" y="344" font-family="monospace" font-size="14" fill="#1d1a15" text-anchor="middle">cost (10K rows, log scale) &#8594;</text>
+        <text x="40" y="170" font-family="monospace" font-size="14" fill="#1d1a15" text-anchor="middle" transform="rotate(-90 40 170)">quality &#8594;</text>
+        <!-- frontier polyline through undominated points -->
+        <path d="M150 250 L260 180 L330 130 L700 60" stroke="#93321b" stroke-width="2.5" fill="none" stroke-dasharray="7 6"/>
+        <!-- code synthesis $0.40, 0.71 -->
+        <circle cx="150" cy="250" r="9" fill="none" stroke="#93321b" stroke-width="3"/>
+        <text x="150" y="282" font-family="monospace" font-size="13" fill="#1d1a15" text-anchor="middle">code synth $0.40 / 0.71</text>
+        <!-- fused $2.50, 0.88 -->
+        <circle cx="260" cy="180" r="9" fill="none" stroke="#93321b" stroke-width="3"/>
+        <text x="260" y="212" font-family="monospace" font-size="13" fill="#1d1a15" text-anchor="middle">fused $2.50 / 0.88</text>
+        <!-- cascade $3.20, 0.95 -->
+        <circle cx="330" cy="130" r="9" fill="none" stroke="#93321b" stroke-width="3"/>
+        <text x="330" y="110" font-family="monospace" font-size="13" fill="#93321b" text-anchor="middle">cascade $3.20 / 0.95</text>
+        <!-- mid-tier $6, 0.93 — dominated -->
+        <circle cx="420" cy="146" r="9" fill="none" stroke="#1d1a15" stroke-width="2.5"/>
+        <text x="500" y="170" font-family="monospace" font-size="13" fill="#1d1a15" text-anchor="middle">mid-tier $6 / 0.93 (dominated)</text>
+        <!-- frontier model $95, 1.00 -->
+        <circle cx="700" cy="60" r="9" fill="none" stroke="#93321b" stroke-width="3"/>
+        <text x="660" y="42" font-family="monospace" font-size="13" fill="#1d1a15" text-anchor="middle">frontier CoT $95 / 1.00</text>
+      </svg>
+      <figcaption>Fig. 10.2 — The Lecture 2 menu as a (cost, quality) plot. Only dominated points may be pruned; the cascade dominates the mid-tier model.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- 22 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Optimizer Theory</div>
+  <h2>Pareto enumeration, kept tractable</h2>
+  <div class="body">
+    <ul>
+      <li>You’ve seen the baby version: Selinger’s <b>“interesting orders.”</b></li>
+      <li>This is interesting orders with the dial turned to eleven.</li>
+      <li>Frontiers grow <b>multiplicatively</b> with pipeline depth.</li>
+      <li>Repairs: sample-based quality estimates, frontier sparsification.</li>
+      <li>Confidence-interval pruning, à la multi-armed bandits.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 23 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Historical Aside</div>
+  <h2>Old theory doesn’t die; it waits for its workload</h2>
+  <div class="body">
+    <ul>
+      <li>1992: Ganguly, Hasan, Krishnamurthy formalize parametric query optimization.</li>
+      <li>2001: Papadimitriou &amp; Yannakakis — multi-objective complexity results.</li>
+      <li>Frontiers can be exponential, yet admit polynomial <b>ε-approximations</b>.</li>
+      <li>Thirty years: a beautiful answer in search of a question.</li>
+      <li>Predicates with API bills made it a load-bearing wall.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 24 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Statistics</div>
+  <h2>Quality estimation: the cardinality estimation of our era</h2>
+  <div class="body">
+    <ul>
+      <li>No precomputed histogram for “fraction a mid-tier model misjudges.”</li>
+      <li>So: <b>online and sampled</b>, scored against a champion frontier model.</li>
+      <li>Week 5 pathologies return: multiplicative error compounding, correlated predicates.</li>
+      <li>New twist: estimates themselves <b>cost money</b> — explore/exploit.</li>
+      <li>The perpetually weakest input; the next decade of papers.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 25 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · DocETL</div>
+  <h2>When every physical plan is bad, rewrite the query</h2>
+  <div class="body">
+    <ul>
+      <li>Sometimes the <b>logical operator</b> is too big to execute faithfully.</li>
+      <li>“Extract all medications from an 80-page record” fails on attention.</li>
+      <li>DocETL’s optimizer is <b>agentic</b>: an LLM proposes pipeline rewrites.</li>
+      <li>Directives: split + gather context, decompose maps, insert resolve.</li>
+      <li>An LLM-as-judge validates rewrites on sampled data.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 26: big number -->
+<section class="slide">
+  <div class="slide-kicker">L2 · DocETL</div>
+  <h2>The unreliable substrate repairing itself</h2>
+  <div class="body">
+    <div class="big">1.34–4.6&#215;</div>
+    <p class="big-label">quality improvement on DocETL’s benchmarks. It works because verification on a sample is cheaper and more reliable than generation in the large — the oldest trick in computer science.</p>
+  </div>
+</section>
+
+<!-- 27 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Synthesis</div>
+  <h2>The physics held; the workload moved</h2>
+  <div class="body"><div class="cols">
+    <ul>
+      <li><b>Intact:</b> declarative queries, logical/physical separation.</li>
+      <li>Cost-based search, statistics, fear of cross products.</li>
+    </ul>
+    <ul>
+      <li><b>Transformed:</b> cost unit — microseconds → dollars.</li>
+      <li>Correctness — exact → bounded-error.</li>
+      <li>“Better” — total order → partial order.</li>
+    </ul>
+  </div></div>
+</section>
+
+<!-- 28: quote -->
+<section class="slide quote-slide">
+  <div class="q">A query plan used to be a route to the one right answer. Now it’s a <b>position you take</b> on a frontier of dollars, hours, and truth.</div>
+  <cite>— Week 10 notes, DATA 2027</cite>
+</section>
+
+<!-- 29: checkpoint -->
+<section class="slide">
+  <div class="slide-kicker">Checkpoint · Discussion</div>
+  <h2>Before you leave</h2>
+  <div class="body">
+    <ul>
+      <li>At what uncertain-band width does a cascade stop beating the naive plan? (Ex 10.1)</li>
+      <li>Why does cost climb as target recall r* moves toward 0.99? (Ex 10.2)</li>
+      <li>Where could DocETL’s LLM-as-judge validation loop be fooled?</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 30: readings -->
+<section class="slide">
+  <div class="slide-kicker">Readings · Due Thursday</div>
+  <h2>Read before Thursday</h2>
+  <div class="body">
+    <ul>
+      <li><b>LOTUS</b> — Patel et al., VLDB 2025. The algebra; calibrated cascade guarantees.</li>
+      <li><b>Palimpzest</b> — Liu, Russo, Cafarella et al., CIDR 2025. The (runtime, cost, quality) Pareto search.</li>
+      <li><b>DocETL</b> — Shankar, Parameswaran, Wu, VLDB 2025. Agentic rewrites; ask where the judge gets fooled.</li>
+    </ul>
+  </div>
+</section>
+
+<script src="deck.js"></script>
+</body>
+</html>

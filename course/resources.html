@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Resources &amp; Reading List — DATA 2027</title>
+<meta name="description" content="The complete annotated reading list for DATA 2027 — all 42 weekly readings, the two books, benchmarks, tools, and how to stay current.">
+<meta name="theme-color" content="#f6f1e7">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23f6f1e7'/%3E%3Cellipse cx='50' cy='28' rx='30' ry='12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 28v44c0 6.6 13.4 12 30 12s30-5.4 30-12V28' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 50c0 6.6 13.4 12 30 12s30-5.4 30-12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500;9..144,600;9..144,900&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400;1,6..72,500&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="course.css">
+</head>
+<body>
+
+<div class="masthead">
+  <span><a href="index.html">DATA 2027</a> <span class="dot">●</span> DATA SYSTEMS IN THE AGENTIC ERA</span>
+  <span><a href="index.html">← SCHEDULE</a></span>
+</div>
+
+<header class="page-head">
+  <div class="kicker">Reference · Resources &amp; Reading List</div>
+  <h1>Everything Worth <em>Reading</em></h1>
+  <p class="standfirst">All forty-two weekly readings in one place, annotated; the two books that hold the course together; the benchmarks, the tools, and where to look after Week 14 ends.</p>
+  <div class="meta"><b>Scope:</b> Weeks 1–14, Labs 1–4 &nbsp;·&nbsp; <b>Format:</b> citations + one-line reading guidance &nbsp;·&nbsp; <b>Duplicates:</b> two papers are assigned twice, on purpose</div>
+</header>
+
+<main>
+
+<section class="block">
+  <div class="sec-label">§ 1 · The Canon</div>
+  <h2>The 42 Weekly Readings, Annotated</h2>
+  <p class="opener">Three readings a week for fourteen weeks. The list below is the complete canon, organized by part, with each paper's one-line reading instruction carried over from its week page. Two readings appear in two different weeks each — the 2005 <i>What Goes Around Comes Around</i> and the Anthropic self-service analytics post — so the deduplicated list runs to forty entries. Where a reading is assigned twice, both week numbers are shown: the repetition is the assignment.</p>
+
+  <h3>Part I — Foundations Under New Workloads (Weeks 1–4)</h3>
+  <div class="reads-block">
+    <div class="read-row"><div class="n">1.1</div><div class="t"><i>Architecture of a Database System</i> — Hellerstein, Stonebraker &amp; Hamilton, Foundations and Trends in Databases, 2007. Sections 1–4 only.<span class="v">The canonical map of the machine. Focus on the process model (§2) and the life of a query (§1.1) — and, on every page, ask which stated assumption is about client behavior.</span></div></div>
+    <div class="read-row"><div class="n">1.2</div><div class="t"><i>What Goes Around Comes Around</i> — Stonebraker &amp; Hellerstein, in <i>Readings in Database Systems</i>, 4th ed., 2005. <b>Assigned twice: Weeks 1 &amp; 14.</b><span class="v">WEEK 1: thirty-five years of data-model fashion cycles in twenty pages — read it as inoculation against rebranded old ideas. WEEK 14: skim the XML chapter and grade its 2005 predictions against the 2024 scorecard — a rare controlled experiment in technological forecasting.</span></div></div>
+    <div class="read-row"><div class="n">1.3</div><div class="t"><i>Self-Service Analytics with Claude</i> — Anthropic engineering blog, June 2026. <b>Assigned twice: Weeks 1 &amp; 9.</b><span class="v">The 21%→95% result. WEEK 1: notice that none of the gains required touching the database engine. WEEK 9: focus on what the curated skills actually contain (metric definitions, join guidance, pitfalls) and who maintains them — it is a semantic layer in everything but name.</span></div></div>
+    <div class="read-row"><div class="n">2.1</div><div class="t"><i>Database Internals</i>, ch. 2–4 &amp; 7 — Alex Petrov, O’Reilly, 2019.<span class="v">Ch. 2–4 give you the B-tree at implementation depth (cell layouts, splits, B-link); ch. 7 is the cleanest LSM treatment in print. Read with a pencil; redo the fanout math for 16 KB pages.</span></div></div>
+    <div class="read-row"><div class="n">2.2</div><div class="t"><i>Designing Access Methods: The RUM Conjecture</i> — Athanassoulis, Kester, Maas, Stoica, Idreos, Ailamaki &amp; Callaghan, EDBT 2016.<span class="v">Short and sharp. Focus on the overhead definitions in §2 and the design-space figure; come to class able to say which corner the last system you used had silently chosen.</span></div></div>
+    <div class="read-row"><div class="n">2.3</div><div class="t"><i>The Log-Structured Merge-Tree (LSM-Tree)</i> — O’Neil, Cheng, Gawlick &amp; O’Neil, Acta Informatica, 1996.<span class="v">Read §1–3 for the rolling-merge idea; skim the rest. The cost model is HDD-era — your job is to notice exactly which assumptions flash and NVMe broke, and which survived.</span></div></div>
+    <div class="read-row"><div class="n">3.1</div><div class="t"><i>“One Size Fits All”: An Idea Whose Time Has Come and Gone</i> — Stonebraker &amp; Çetintemel, ICDE 2005.<span class="v">Read for the method, not the predictions: how to argue from workload characteristics to architecture. Note which of its bets aged well (warehousing, streams) and which didn’t.</span></div></div>
+    <div class="read-row"><div class="n">3.2</div><div class="t"><i>C-Store: A Column-oriented DBMS</i> — Stonebraker et al., VLDB 2005.<span class="v">Focus on §3–4: projections, sort-order-dependent compression, and the WS/RS split. Ask yourself at every design choice: which corner of the RUM triangle is being traded away?</span></div></div>
+    <div class="read-row"><div class="n">3.3</div><div class="t"><i>MonetDB/X100: Hyper-Pipelining Query Execution</i> — Boncz, Zukowski &amp; Nes, CIDR 2005.<span class="v">Focus on §2 (why TPC-H Q1 gets &lt;10% of hand-coded performance in tuple-at-a-time engines) and the vector-size experiment — the U-shaped curve is the whole lecture in one figure.</span></div></div>
+    <div class="read-row"><div class="n">4.1</div><div class="t"><i>Amazon Aurora: Design Considerations for High Throughput Cloud-Native Relational Databases</i> — Verbitski et al., SIGMOD 2017.<span class="v">The canonical “ship only the log” paper. Focus on §2–3: the write amplification accounting in Figure 2, and derive the 4/6–3/6 quorum from the AZ+1 model yourself before reading their derivation.</span></div></div>
+    <div class="read-row"><div class="n">4.2</div><div class="t"><i>The Snowflake Elastic Data Warehouse</i> — Dageville et al., SIGMOD 2016.<span class="v">Read for the three-layer architecture and §3.3 on micro-partitions and pruning. Ask at every section: which property here is enabled by immutability alone?</span></div></div>
+    <div class="read-row"><div class="n">4.3</div><div class="t"><i>Building an Elastic Query Engine on Disaggregated Storage</i> — Vuppalapati et al., NSDI 2020.<span class="v">The production retrospective: what the 2016 bet got right, measured. Focus on the workload skew and cache hit-rate data, and the open problem of intermediate (shuffle/spill) data.</span></div></div>
+  </div>
+
+  <h3>Part II — New Access Methods &amp; Engines (Weeks 5–8)</h3>
+  <div class="reads-block">
+    <div class="read-row"><div class="n">5.1</div><div class="t"><i>The Case for Learned Index Structures</i> — Kraska, Beutel, Chi, Dean &amp; Polyzotis, SIGMOD 2018.<span class="v">Read §1–3 closely for the CDF framing and the RMI; treat the eval skeptically and bring one benchmark objection (the SOSD authors found several).</span></div></div>
+    <div class="read-row"><div class="n">5.2</div><div class="t"><i>Bao: Making Learned Query Optimization Practical</i> — Marcus, Negi, Mao, Tatbul, Alizadeh &amp; Kraska, SIGMOD 2021.<span class="v">Focus on §2’s design constraints and the Thompson-sampling loop — note how every choice traces back to a specific deployment failure of Neo.</span></div></div>
+    <div class="read-row"><div class="n">5.3</div><div class="t"><i>SageDB: A Learned Database System</i> — Kraska, Alizadeh, Beutel, Chi, Ding, Kristo, Leclerc, Madden, Mao &amp; Nathan, CIDR 2019.<span class="v">Read as a manifesto, not a system paper; as you read, mark each proposed component as policy or mechanism, and check your marks against what Redshift shipped.</span></div></div>
+    <div class="read-row"><div class="n">6.1</div><div class="t"><i>Product Quantization for Nearest Neighbor Search</i> — Jégou, Douze &amp; Schmid, IEEE TPAMI, 2011.<span class="v">The codebook math behind every compressed vector index. Work through §III until the 256^16-codebook trick and the asymmetric distance tables feel obvious; skim the GIST results.</span></div></div>
+    <div class="read-row"><div class="n">6.2</div><div class="t"><i>Efficient and Robust Approximate Nearest Neighbor Search Using Hierarchical Navigable Small World Graphs</i> — Malkov &amp; Yashunin, IEEE TPAMI, 2018.<span class="v">Focus on the neighbor-selection heuristic (Alg. 4) and the layer assignment — the skip-list analogy is in the paper. Note carefully what the memory model assumes.</span></div></div>
+    <div class="read-row"><div class="n">6.3</div><div class="t"><i>DiskANN: Fast Accurate Billion-point Nearest Neighbor Search on a Single Node</i> — Subramanya, Devvrit, Simhadri, Krishnaswamy &amp; Kadekodi, NeurIPS 2019.<span class="v">Read for the systems decisions, not the graph theory: why α &gt; 1, why PQ steers while SSD stores, why node + adjacency share a block. Compare its cost model against HNSW’s before class.</span></div></div>
+    <div class="read-row"><div class="n">7.1</div><div class="t"><i>Lakehouse: A New Generation of Open Platforms that Unify Data Warehousing and Advanced Analytics</i> — Armbrust, Ghodsi, Xin &amp; Zaharia, CIDR 2021.<span class="v">Read it as an argument, not an ad: extract the three technical bets in §3 and decide which one carries the most risk. Note what the paper says two-tier architectures cost in staleness and copies.</span></div></div>
+    <div class="read-row"><div class="n">7.2</div><div class="t"><i>Apache Iceberg Table Spec, v2</i> — Apache Software Foundation; pair with Ryan Blue’s <i>“Iceberg: a fast table format for S3”</i> talk, Netflix, 2018.<span class="v">Focus on the manifest and snapshot sections: find where per-column bounds live and convince yourself the commit protocol needs nothing stronger than one CAS. The talk supplies the Hive war stories the spec politely omits.</span></div></div>
+    <div class="read-row"><div class="n">7.3</div><div class="t"><i>Photon: A Fast Query Engine for Lakehouse Systems</i> — Behm, Palkar, Agarwal et al., SIGMOD 2022.<span class="v">Focus on §3’s decision to vectorize-and-interpret rather than code-generate (and the JVM pathologies in §2), plus the adaptive per-batch kernels. Skim the eval with Week 2’s benchmark skepticism.</span></div></div>
+    <div class="read-row"><div class="n">8.1</div><div class="t"><i>Calvin: Fast Distributed Transactions for Partitioned Database Systems</i> — Thomson, Diamond, Weng, Ren, Shao &amp; Abadi, SIGMOD 2012.<span class="v">Focus on §3 (the sequencer) and §3.2.1 (dependent transactions / OLLP) — convince yourself why determinism really removes 2PC, and what it costs.</span></div></div>
+    <div class="read-row"><div class="n">8.2</div><div class="t"><i>Spanner: Google’s Globally-Distributed Database</i> — Corbett et&nbsp;al., OSDI 2012.<span class="v">Read §3 (TrueTime) and §4.1.2 (commit wait) closely; skim the rest. Work the invariant: why must locks be held through the wait?</span></div></div>
+    <div class="read-row"><div class="n">8.3</div><div class="t"><i>Neon architecture posts: “Architecture decisions in Neon” &amp; the pageserver/branching deep-dives</i> — Neon engineering blog, 2022–24.<span class="v">Focus on GetPage@LSN, the layer-file map, and what branch creation actually writes — verify Thursday’s O(metadata) claim against their design.</span></div></div>
+  </div>
+
+  <h3>Part III — Semantics, Agents, Governance (Weeks 9–12)</h3>
+  <div class="reads-block">
+    <div class="read-row"><div class="n">9.1</div><div class="t"><i>Spider 2.0: Evaluating Language Models on Real-World Enterprise Text-to-SQL Workflows</i> — Lei et al., ICLR 2025.<span class="v">The 86→17 cliff, quantified. Focus on §3’s task construction and the error analysis: count how many failures are schema-scale or business-logic problems rather than SQL-skill problems.</span></div></div>
+    <div class="read-row"><div class="n">9.2</div><div class="t"><i>Can LLM Already Serve as a Database Interface? A BIg Bench for Large-Scale Database Grounded Text-to-SQLs (BIRD)</i> — Li et al., NeurIPS 2023.<span class="v">Read for the “external knowledge” design decision — the first benchmark to admit questions underdetermine SQL — and bring a skeptical eye to the gold annotations; we discuss the audit findings in class.</span></div></div>
+    <div class="read-row"><div class="n">9.3</div><div class="t"><i>How Anthropic Built Self-Service Analytics with Claude</i> — Anthropic engineering blog, June 2026. <b>See entry 1.3 above</b> — assigned in both Weeks 1 and 9; the Week-9 reading instruction is folded into that entry.<span class="v">Reread it after Spider 2.0 and BIRD: the same post reads completely differently once you know what the benchmarks can’t measure.</span></div></div>
+    <div class="read-row"><div class="n">10.1</div><div class="t"><i>Semantic Operators: A Declarative Model for Rich, AI-Based Data Processing (LOTUS)</i> — Patel, Jha, Asawa, Pan, Guestrin &amp; Zaharia, VLDB 2025.<span class="v">The algebra itself. Focus on the formal semantics of accuracy targets and the cascade algorithms for sem_filter/sem_join — especially how thresholds are calibrated to give statistical guarantees, not vibes.</span></div></div>
+    <div class="read-row"><div class="n">10.2</div><div class="t"><i>Palimpzest: Optimizing AI-Powered Analytics with Declarative Query Processing</i> — Liu, Russo, Cafarella et al., CIDR 2025.<span class="v">The optimizer story. Focus on the physical plan space (model tiers, fusion, code synthesis) and how plan search handles the (runtime, cost, quality) Pareto frontier; skim the implementation section.</span></div></div>
+    <div class="read-row"><div class="n">10.3</div><div class="t"><i>DocETL: Agentic Query Rewriting and Evaluation for Complex Document Processing</i> — Shankar, Parameswaran &amp; Wu, VLDB 2025.<span class="v">Optimization beyond physical operator choice. Focus on the rewrite directives and on how LLM-as-judge validates rewrites — ask yourself where this validation loop could be fooled.</span></div></div>
+    <div class="read-row"><div class="n">11.1</div><div class="t"><i>Mem0: Building Production-Ready AI Agents with Scalable Long-Term Memory</i> — Chhikara, Khant, Aryan, Singh &amp; Yadav, arXiv:2504.19413, 2025.<span class="v">Read §3 as a write-path spec: extraction then ADD/UPDATE/DELETE/NOOP consolidation. Focus on the latency/token tables and ask where an audit log would have to live.</span></div></div>
+    <div class="read-row"><div class="n">11.2</div><div class="t"><i>Zep: A Temporal Knowledge Graph Architecture for Agent Memory</i> — Rasmussen, Paliychuk, Beauvais, Ryan &amp; Chalef, arXiv:2501.13956, 2025.<span class="v">The Graphiti bi-temporal edge model is the heart. Map t_valid/t_invalid onto SQL:2011 periods and Type-2 SCDs as you read — the correspondence is nearly exact.</span></div></div>
+    <div class="read-row"><div class="n">11.3</div><div class="t"><i>MemGPT: Towards LLMs as Operating Systems</i> — Packer, Wooders, Lin, Fang, Patil, Stoica &amp; Gonzalez, arXiv:2310.08560, 2023.<span class="v">Read the OS metaphor adversarially: main/external context is a buffer pool with the application as its own buffer manager. List the failure modes that DBMSs solved by NOT doing this.</span></div></div>
+    <div class="read-row"><div class="n">12.1</div><div class="t"><i>Model Context Protocol — Specification</i> — Anthropic &amp; the MCP community, 2024–2025.<span class="v">Read the architecture and the tools/resources/prompts sections. Focus on the trust boundaries and what the spec explicitly leaves to server authors — that list is the attack surface.</span></div></div>
+    <div class="read-row"><div class="n">12.2</div><div class="t"><i>The Lethal Trifecta</i> &amp; <i>The Supabase MCP can leak your entire SQL database</i> — Simon Willison, 2025.<span class="v">The trifecta post is the mental model; the Supabase walkthrough is the proof. Trace each leg of the trifecta onto each step of the exploit as you read.</span></div></div>
+    <div class="read-row"><div class="n">12.3</div><div class="t"><i>OWASP Top 10 for LLM Applications</i> — OWASP, 2025.<span class="v">Read LLM01 (Prompt Injection), LLM02 (Sensitive Information Disclosure), and the excessive-agency entry. Map each to a database control from Thursday’s defenses table.</span></div></div>
+  </div>
+
+  <h3>Part IV — Frontier &amp; Futures (Weeks 13–14)</h3>
+  <div class="reads-block">
+    <div class="read-row"><div class="n">13.1</div><div class="t"><i>Self-Driving Database Management Systems</i> — Pavlo et al., CIDR 2017.<span class="v">The manifesto. Focus on the forecast→plan→act architecture and the explicit analogy ladder from “advisor” to “autonomous” — then ask which rung an LLM agent occupies.</span></div></div>
+    <div class="read-row"><div class="n">13.2</div><div class="t"><i>The Data Calculator: Data Structure Design and Cost Synthesis from First Principles and Learned Cost Models</i> — Idreos et al., SIGMOD 2018.<span class="v">Read for the design-space framing, not the implementation: layout primitives, the 10^32 continuum, and how learned micro-benchmark models compose into whole-structure cost predictions.</span></div></div>
+    <div class="read-row"><div class="n">13.3</div><div class="t"><i>OtterTune postmortem</i> — A. Pavlo, blog post, 2024.<span class="v">A rare honest startup autopsy by its own founder. Focus on why the science worked and the business didn’t: episodic value, and platforms absorbing the feature.</span></div></div>
+    <div class="read-row"><div class="n">14.1</div><div class="t"><i>What Goes Around Comes Around… And Around…</i> — M. Stonebraker &amp; A. Pavlo, SIGMOD Record 53(2), 2024.<span class="v">The lecture’s backbone. Focus on the scoring of NoSQL and graph, and on which “lessons” the authors say never change — you will cite both sides of it in the debate.</span></div></div>
+    <div class="read-row"><div class="n">14.2</div><div class="t"><i>The Seattle Report on Database Research</i> — D. Abadi et al., CACM 65(8), 2022.<span class="v">The field’s last pre-agentic self-portrait. Focus on what the community ranked urgent in 2022 versus what this course argued matters now — the gaps are your debate ammunition.</span></div></div>
+    <div class="read-row"><div class="n">14.3</div><div class="t"><i>What Goes Around Comes Around</i> — Stonebraker &amp; Hellerstein, 2005. <b>See entry 1.2 above</b> — assigned in both Weeks 1 and 14; the Week-14 reading instruction is folded into that entry.<span class="v">The pairing with 14.1 is the point: the same authorship lineage grading its own twenty-year-old predictions.</span></div></div>
+  </div>
+
+  <div class="aside"><span class="k">A note on links</span>Where a reading lists only a venue, find it through the venue’s proceedings or the authors’ pages — every paper above is freely available from at least one of those. We deliberately don’t pin URLs for papers: they rot faster than citations do.</div>
+</section>
+
+<section class="block">
+  <div class="sec-label">§ 2 · The Two Books</div>
+  <h2>Petrov, and the Alternate On-Ramp</h2>
+  <p class="opener">Only one book is required: Alex Petrov’s <i>Database Internals</i> (O’Reilly, 2019; <a href="https://www.databass.dev">databass.dev</a>). It is the course’s implementation-depth backstop — when a lecture asserts something about page layouts, recovery, or consensus and you want to see the actual mechanics, Petrov is where you go. Only chapters 2–4 and 7 are formally assigned (Week 2), but the rest of the book shadows the syllabus:</p>
+  <table>
+    <thead><tr><th>Chapters</th><th>Topic</th><th>Where it lands in DATA 2027</th></tr></thead>
+    <tbody>
+      <tr><td>ch. 1</td><td>Introduction; storage-engine taxonomy</td><td>Background for Week 1</td></tr>
+      <tr><td>ch. 2–4</td><td>B-tree basics, file formats, implementing B-trees</td><td><b>Assigned, Week 2</b>; foundation for Lab 1</td></tr>
+      <tr><td>ch. 5</td><td>Transaction processing &amp; recovery (WAL, ARIES-style thinking)</td><td>Weeks 2 &amp; 8; Lab 2’s WAL design</td></tr>
+      <tr><td>ch. 6</td><td>B-tree variants (B-link, copy-on-write trees)</td><td>Week 2 skim; copy-on-write returns in Week 8</td></tr>
+      <tr><td>ch. 7</td><td>Log-structured storage (LSM-trees, compaction)</td><td><b>Assigned, Week 2</b>; the spec for Lab 1</td></tr>
+      <tr><td>ch. 8–10</td><td>Distributed systems primer; failure detection; leader election</td><td>Background for Week 4</td></tr>
+      <tr><td>ch. 11–12</td><td>Replication, consistency, anti-entropy</td><td>Weeks 4 &amp; 8</td></tr>
+      <tr><td>ch. 13–14</td><td>Distributed transactions; consensus</td><td>Week 8, alongside Calvin and Spanner</td></tr>
+    </tbody>
+  </table>
+  <p>The alternate on-ramp is Martin Kleppmann’s <i>Designing Data-Intensive Applications</i> (O’Reilly, 2017; <a href="https://dataintensive.net">dataintensive.net</a>). It covers much of the same territory one level of abstraction up — system properties and trade-offs rather than page formats and cell layouts. If Petrov’s chapter 4 feels like reading a disassembly, start with DDIA’s chapters 3 (storage and retrieval) and 5–9 (replication through consistency), then come back. Students who arrive from an applications background consistently report that DDIA-first, Petrov-second is the gentler path; students who have written a storage engine before can skip DDIA entirely.</p>
+</section>
+
+<section class="block">
+  <div class="sec-label">§ 3 · Benchmarks &amp; Leaderboards</div>
+  <h2>How Progress Gets Measured — and Mismeasured</h2>
+  <p class="opener">Week 9 and Lab 3 lean on two text-to-SQL benchmarks, and you should know both as artifacts, not just as numbers.</p>
+  <ul>
+    <li><b><a href="https://spider2-sql.github.io/">Spider 2.0</a></b> (Lei et al., ICLR 2025) — enterprise-scale workflows over real warehouses: thousand-column schemas, dialect quirks, multi-step tasks that require reading project documentation. This is the benchmark where leaderboard scores fell off the famous cliff relative to its predecessor, and the one Lab 3’s eval harness imitates in miniature.</li>
+    <li><b><a href="https://bird-bench.github.io/">BIRD</a></b> (Li et al., NeurIPS 2023) — large-scale, database-grounded text-to-SQL with “external knowledge” attached to questions: the first major benchmark to admit that natural-language questions underdetermine SQL.</li>
+  </ul>
+  <h3>What to know about eval quality</h3>
+  <p>Treat every leaderboard number as a measurement made with an imperfect instrument. Independent audits of BIRD’s gold annotations have found a substantial fraction of reference queries that are arguably wrong — ambiguous questions, gold SQL that doesn’t match the stated intent, schema values that contradict the “external knowledge.” This matters in both directions: systems get penalized for correct answers and rewarded for reproducing annotation mistakes. When a model “beats human performance” on a benchmark whose human-written gold labels contain errors, ask what is actually being measured. Lab 3 makes this concrete: part of your grade is auditing your own eval set and reporting the annotation defects you find. The habit generalizes — Week 2’s benchmark skepticism (RUM corners, hardware assumptions) and Week 9’s annotation skepticism are the same skill applied at different layers.</p>
+</section>
+
+<section class="block">
+  <div class="sec-label">§ 4 · Tools You’ll Touch</div>
+  <h2>The Lab Toolchain</h2>
+  <p class="opener">Four labs, four primary tools. Install all of them in Week 1; nothing here takes more than a few minutes to set up, and Lab 1’s toolchain check is due before Week 2.</p>
+  <table>
+    <thead><tr><th>Tool</th><th>Lab</th><th>Role</th><th>Link</th></tr></thead>
+    <tbody>
+      <tr><td><b>Rust + cargo</b></td><td>Lab 1 (Weeks 2–4)</td><td>Implementation language for VLSM, your LSM-tree with vector segments — you’ll own memtables, SSTables, compaction, and a vector access method.</td><td><a href="https://www.rust-lang.org/">rust-lang.org</a></td></tr>
+      <tr><td><b>MinIO</b></td><td>Lab 2 (Weeks 5–8)</td><td>S3-compatible object store run locally; the disaggregated storage layer under Mini-Neon’s copy-on-write pages and branches.</td><td><a href="https://min.io/">min.io</a></td></tr>
+      <tr><td><b>DuckDB</b></td><td>Lab 3 (Weeks 9–10)</td><td>The analytical engine your text-to-SQL agent targets and your eval harness queries — in-process, zero-ops, full SQL.</td><td><a href="https://duckdb.org/">duckdb.org</a></td></tr>
+      <tr><td><b>Python 3.11+</b></td><td>Lab 4 (Weeks 10–12)</td><td>Host language for the semantic-operator optimizer: logical plans, model-tier physical operators, and cascade calibration.</td><td><a href="https://www.python.org/">python.org</a></td></tr>
+    </tbody>
+  </table>
+  <p>Secondary dependencies (an LLM API key for Labs 3–4, plotting libraries for lab reports) are listed on each lab page: <a href="lab-1.html">Lab 1</a>, <a href="lab-2.html">Lab 2</a>, <a href="lab-3.html">Lab 3</a>, <a href="lab-4.html">Lab 4</a>.</p>
+</section>
+
+<section class="block">
+  <div class="sec-label">§ 5 · Staying Current</div>
+  <h2>After Week 14</h2>
+  <p class="opener">This course will be stale in places within a year — Part III especially. The fix is a short list of feeds that have stayed reliable while everything else churned.</p>
+  <ul>
+    <li><b>Andy Pavlo’s annual “Databases in 20XX” retrospectives</b> — <a href="https://www.cs.cmu.edu/~pavlo/blog/">cs.cmu.edu/~pavlo/blog</a>. One post a year, every January, scoring the previous year’s acquisitions, funding, failures, and fashion cycles. The single highest signal-to-noise database publication in existence; read the whole back catalog.</li>
+    <li><b>The three venues</b> — <a href="https://www.cidrdb.org/">CIDR</a> (January; where systems people publish opinions and architectures — Lakehouse, SageDB, Palimpzest, and self-driving DBMSs all debuted here), SIGMOD (June), and VLDB (August/September). Skim the industrial tracks first: that is where the production retrospectives live.</li>
+    <li><b>CMU Database Group seminar videos</b> — <a href="https://www.youtube.com/@CMUDatabaseGroup">youtube.com/@CMUDatabaseGroup</a>. Weekly talks from the people building the systems in this syllabus, including the “quarantine tech talks” archive; the fastest way to hear how a paper’s claims sound when its authors defend them live.</li>
+    <li><b>The two companion essays on this site</b> — <a href="../index.html">Essay № 01</a>, the argument that the database client has changed, and <a href="../course.html">Essay № 02</a>, the design rationale for this course. Reread both after the final exam; they were written to be disagreed with, and by Week 14 you will be equipped to.</li>
+  </ul>
+  <div class="fleuron">❦</div>
+</section>
+
+<nav class="pager">
+  <a href="instructors.html"><span class="dir">← Instructors</span><span class="ttl">Teaching DATA 2027</span></a>
+  <a class="next" href="index.html"><span class="dir">Schedule →</span><span class="ttl">Course home</span></a>
+</nav>
+
+</main>
+
+<footer class="site">
+  <div class="inner">
+    <span>DATA 2027 — a course that doesn’t exist yet · <a href="../index.html">Essay № 01</a> · <a href="../course.html">Essay № 02</a></span>
+    <span>CC BY 4.0 · built with <a href="https://claude.com/claude-code">Claude Code</a></span>
+  </div>
+</footer>
+
+</body>
+</html>

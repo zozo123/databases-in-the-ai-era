@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Teaching DATA 2027 — Instructor's Guide</title>
+<meta name="description" content="How to run DATA 2027 at your institution: pacing variants for semesters, quarters, and undergrads; lab logistics and grading load; enforcing the open-model policy; re-skinning the trap schema; and an honest provenance note.">
+<meta name="theme-color" content="#f6f1e7">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23f6f1e7'/%3E%3Cellipse cx='50' cy='28' rx='30' ry='12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 28v44c0 6.6 13.4 12 30 12s30-5.4 30-12V28' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 50c0 6.6 13.4 12 30 12s30-5.4 30-12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500;9..144,600;9..144,900&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400;1,6..72,500&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="course.css">
+</head>
+<body>
+
+<div class="masthead">
+  <span><a href="index.html">DATA 2027</a> <span class="dot">●</span> DATA SYSTEMS IN THE AGENTIC ERA</span>
+  <span><a href="index.html">← SCHEDULE</a></span>
+</div>
+
+<header class="page-head">
+  <div class="kicker">Instructor's Guide</div>
+  <h1>Teaching a Course That Doesn't <em>Exist</em> Yet</h1>
+  <p class="standfirst">Everything on this site is real coursework; only the registrar entry is fictional. This page is for the person who wants to fix that — what to keep, what to cut, what to strip from the instructor materials before students see them, and what it costs you in grading hours.</p>
+  <div class="meta"><b>Audience:</b> faculty &amp; TAs &nbsp;·&nbsp; <b>License:</b> CC BY 4.0 — adapt freely, attribute somewhere &nbsp;·&nbsp; <b>Prereq for teaching:</b> read both companion essays and run all four labs' starter code yourself first</div>
+</header>
+
+<main>
+
+<section class="block">
+  <div class="objectives">
+    <div class="k">This guide covers</div>
+    <ul>
+      <li>Why the course is sequenced stack-upward, and how the central thesis doubles as a grading instrument.</li>
+      <li>Three pacing variants: 14-week semester, 10-week quarter, undergraduate adaptation.</li>
+      <li>Lab logistics — what ships ready-made, what you must prepare, and the expected grading load.</li>
+      <li>Enforcing "accountability, not abstinence" when frontier models are allowed everywhere.</li>
+      <li>Re-skinning the Vantage Retail Group trap schema for your institution's domain.</li>
+    </ul>
+  </div>
+</section>
+
+<section class="block">
+  <div class="sec-label">1 · Philosophy</div>
+  <h2>Why Stack-Upward, and Why Frontiers</h2>
+  <p class="opener">The course climbs from storage engines to agent governance because that is the order in which the thesis can be tested rather than asserted. The claim — <strong>the client changed, the physics didn't</strong> — is empty until students know what the physics are. So Part I re-reads B-trees, LSM-trees, and column stores as workload bets; Part II shows which bets the new client violates (recall as a first-class axis, branchable storage, learned components); Part III climbs to where accuracy actually lives; Part IV asks whether any of it is genuinely new. Teach it top-down and every claim about vector indexes or semantic layers becomes vendor folklore. Teach it bottom-up and Week 6's "a vector index is an access method, not a product" lands as an observation students can verify with amplification arithmetic they did in Week 2.</p>
+  <p>The thesis is also your grading instrument. Almost every assessment in the course reduces to one move: <em>identify the classical assumption, show what the agentic workload does to it, measure the consequence</em>. When you grade an exam answer or a project paper and can't find that move, the answer is wrong even when it is fluent — and fluency is now free, which is the point.</p>
+  <p>This is why everything is graded on Pareto frontiers and ablation tables rather than point estimates. A single headline number ("95% accuracy," "2 ms p99") is exactly the artifact a frontier model can produce on request, and exactly the artifact vendors lead with. A frontier requires the student to have actually swept the trade-off; an ablation requires them to have actually built each configuration. Both are cheap to verify (re-run the harness) and expensive to fake (you'd have to build the system anyway). The grading scheme is the LLM policy, expressed in points.</p>
+  <div class="pull">The grading scheme <b>is</b> the LLM policy, expressed in points.</div>
+</section>
+
+<section class="block">
+  <div class="sec-label">2 · Pacing</div>
+  <h2>Three Ways to Schedule It</h2>
+  <p>The 14-week semester is the design target: four parts, four labs, a project with real incubation time. The compressions below have been thought through; cutting anything else starts to sever load-bearing dependencies (Week 2's amplification arithmetic feeds Lab 1; Week 9's curve feeds Lab 3 directly).</p>
+  <table>
+    <thead><tr><th>Variant</th><th>Schedule</th><th>What changes</th><th>What it costs</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><strong>Semester</strong><br>14 weeks</td>
+        <td>As published. Labs in weeks 2–4, 5–8, 9–10, 10–12; project weeks 9–14; exam after Week 14.</td>
+        <td>Nothing.</td>
+        <td>Nothing. This is the course.</td>
+      </tr>
+      <tr>
+        <td><strong>Quarter</strong><br>10 weeks</td>
+        <td>Cut Week 3 (column stores / vectorized execution) and Week 13 (self-driving systems); merge Weeks 11 and 12 into one "memory + protocols" week — Mem0/Graphiti on Tuesday, MCP and the lethal trifecta on Thursday.</td>
+        <td>Assign Week 3's two readings as background for Lab 1's quantization milestone; fold Week 13's self-design question into the Week 14 debate. Keep all four labs but overlap Labs 3 and 4 fully.</td>
+        <td>Students meet vectorized execution as a reading, not a lecture; the memory week loses its second lecture's depth. Acceptable. Cutting any Part I week other than 3 is not.</td>
+      </tr>
+      <tr>
+        <td><strong>Undergrad</strong><br>14 weeks</td>
+        <td>Same lecture sequence, slower lab ramp. Drop Lab 1 Milestones 3–4 (graph-merging compaction and the full frontier harness) — students stop at a working SSTable format plus per-segment index, graded on correctness and a single measured trade-off. Replace the formal parts of exam Q1 (<em>RUM-R</em>) and Q4 (<em>the optimizer's new objective</em>) with structured essays: argue the four-axis conjecture and the multi-objective optimizer in prose, with one worked numeric example instead of a formalization.</td>
+        <td>Reweight Lab 1 to 10% and the project to 40%, or add a fifth problem-set week. Keep Labs 3 and 4 intact — they are the most undergrad-accessible and the most employable.</td>
+        <td>The course loses its hardest systems-building rite of passage. The thesis survives; the calluses don't.</td>
+      </tr>
+    </tbody>
+  </table>
+</section>
+
+<section class="block">
+  <div class="sec-label">3 · Labs</div>
+  <h2>Running the Labs</h2>
+  <p>Every lab ships with machine-tested starter materials under <a href="materials/lab1/README.md"><code>materials/</code></a> — Rust skeleton for Lab 1, Go pageserver for Lab 2, the full warehouse DDL and reference semantic layer for Lab 3, the deterministic simulator for Lab 4. What ships is the <em>instructor edition</em>. Four preparation tasks are yours, and two of them are about keeping answer keys out of student hands.</p>
+  <table>
+    <thead><tr><th>Lab</th><th>Provided</th><th>You must</th><th>Grading load (pairs)</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><strong>1 · VLSM</strong><br>Rust, wks 2–4</td>
+        <td>Cargo skeleton (<code>memtable.rs</code>, <code>sstable.rs</code>, <code>workload.rs</code>), deterministic workload generator, <code>bench.rs</code> harness stub. <code>cargo test</code> passes on the skeleton.</td>
+        <td>Distribute the grading suite — the hidden workload traces and recall ground truth — <strong>at the end of Week 2</strong>, after Milestone 1 is in. Releasing it with the skeleton invites overfitting the file format to the trace; withholding it past Week 2 makes Milestone 4's frontier unbuildable.</td>
+        <td>~45 min/team: re-run their harness, eyeball the frontier for swept (not cherry-picked) points, read the ablation.</td>
+      </tr>
+      <tr>
+        <td><strong>2 · Mini-Neon</strong><br>any lang, wks 5–8</td>
+        <td>Go reference types, WAL generator (<code>cmd/walgen</code>), pageserver and branch skeletons. <code>go vet</code> clean.</td>
+        <td>Stand up <strong>MinIO</strong> (or any S3-compatible store) before Week 5 — one shared instance with per-team buckets is fine; the lab's GetPage@LSN latencies assume object storage with real network round-trips, so do not let teams substitute the local filesystem. Budget an hour for credentials and a smoke test with <code>walgen</code>.</td>
+        <td>~60 min/team: the 50-branch demo plus GC must run from their tag against your MinIO, not theirs.</td>
+      </tr>
+      <tr>
+        <td><strong>3 · Text-to-SQL</strong><br>Python, wks 9–10</td>
+        <td>Full 126-table Vantage DDL, 50 gold questions, reference semantic layer, grader stub.</td>
+        <td>The shipped <a href="materials/lab3/schema.sql"><code>schema.sql</code></a> is the instructor edition: it carries 40 <code>-- TRAP</code> comments annotating every salted dysfunction. <strong>Strip them</strong> (one <code>grep -v</code>) to produce <code>schema_student.sql</code> before distribution, build the DuckDB snapshot, pin its SHA-256 in <code>MANIFEST</code>. Hold back <code>questions.jsonl</code> and the reference <code>semantic_layer.yaml</code> entirely — the gold questions are your held-out set and your leakage detector.</td>
+        <td>~90 min/team: re-run the ablation grid, run the leakage diff, score their grader against your near-miss cases.</td>
+      </tr>
+      <tr>
+        <td><strong>4 · Semantic optimizer</strong><br>Python, wks 10–12</td>
+        <td><code>simulator.py</code>, <code>make_data.py</code> (seeded, byte-identical corpus), operator stubs, 500 sanctioned calibration labels.</td>
+        <td>The simulator students receive necessarily contains <code>ground_truth_filter</code> — but the <strong>grading salt and re-labeled held-out configuration stay with you</strong>. Generate a fresh salt per cohort, never commit it, and cap teams at five graded submissions so the autograder can't be used as an oracle. The grader re-labels under your salt; gold-mined plans collapse on contact.</td>
+        <td>~45 min/team: mostly automated; the human time goes to reading the cascade-guarantee argument in the report.</td>
+      </tr>
+    </tbody>
+  </table>
+  <p>Total per cohort of 15 pairs: roughly 60 TA-hours across the term, front-loaded at lab deadlines. The deterministic harnesses are what make this tractable — every number in every report regenerates from a Git tag, so grading is re-running, not believing.</p>
+</section>
+
+<section class="block">
+  <div class="sec-label">4 · The Model Policy</div>
+  <h2>Accountability, Not Abstinence, in Practice</h2>
+  <p>The policy — frontier models allowed everywhere, including the exam — reads as permissive. Enforced properly, it is the opposite: it relocates all integrity weight onto artifacts that models cannot fake, then makes faking them deterministically detectable.</p>
+  <p><strong>Require methods notes.</strong> Every lab report and the exam carry a mandatory model-usage section: which models, for what, what they got wrong, what was kept. Grade it for specificity, not contrition — "Claude wrote the first compaction loop; it deadlocked on concurrent flush; here is the fix" is an A-grade sentence. Students learn quickly that the note is free marks if honest and a liability if vague, which is exactly the incentive you want them to carry into industry.</p>
+  <p><strong>Know what cheating looks like when models are legal.</strong> It is never "used an LLM." It is:</p>
+  <ul>
+    <li><strong>Gold-mining Lab 4's simulator.</strong> The labels are produced by visible code; deriving them from <code>ground_truth_filter</code>, the salt, or the planted signal fragments — in code or "by inspection" — is the violation, and the lab page says so in those words. Detection is structural: the grader re-labels under a fresh salt, so a mined plan's quality collapses while an honest cascade's quality holds within its stated guarantee. Submission-throttling (five graded runs) closes the slower oracle attack.</li>
+    <li><strong>Eval leakage in Lab 3.</strong> The subtle form is writing the semantic layer <em>after</em> watching the agent fail, encoding per-question fixes as "documentation." Detection: diff the YAML against question text for near-verbatim overlap, and compare accuracy on their 50 questions against your 10 held-out instructor questions on the same schema. A large gap is leakage, mechanically.</li>
+  </ul>
+  <p>Both detections work only because the harnesses are deterministic — pinned model via the course proxy, temperature 0, fixed seeds, pinned snapshots. Preserve that determinism above all else when you adapt the course; it is the entire enforcement mechanism. A policy of "use anything, but every number must reproduce from your tag on our hardware" needs no honor code. The honor code is <code>make reproduce</code>.</p>
+  <blockquote class="verbatim">What is graded is what models can't fake: Pareto frontiers from your own benchmarks, ablation tables, and designs you can defend in a hallway argument.<cite>— the course LLM policy, index page</cite></blockquote>
+</section>
+
+<section class="block">
+  <div class="sec-label">5 · Adaptation</div>
+  <h2>Re-Skinning the Trap Schema</h2>
+  <p>Vantage Retail Group is a synthetic retailer because retail is universally legible, but the schema works better when it smells like <em>your</em> institution's domain — a hospital network, a university ERP, a logistics firm. Re-skinning is safe if you understand what the 50 gold queries actually depend on: <strong>identifiers and data values, not semantics</strong>. The rules:</p>
+  <ul>
+    <li><strong>Rename, never restructure.</strong> Build a single rename map (schema, table, and column names — <code>finance.revenue_recognized</code> → <code>billing.charges_recognized</code>, etc.) and apply it consistently to the DDL, the data generator, the gold SQL in <code>questions.jsonl</code>, and the reference <code>semantic_layer.yaml</code> in one pass. A <code>sed</code>-script-from-a-table is the right tool; hand-editing four files is how gold queries silently break.</li>
+    <li><strong>Preserve the trap topology.</strong> The three-revenue-variants trap must survive as three same-quantity-different-definition tables with the same grain, currency, and timing differences; the two active-user definitions must remain two defensible windows; the fourteen frozen legacy tables keep their <code>*_old</code>/<code>*_v1</code>/<code>*_bak</code> suffixes and their freeze dates. The traps are the pedagogy — a hospital version has "billed vs. collected vs. recognized charges," not fewer revenue tables.</li>
+    <li><strong>Do not touch grains, dates, or numbers.</strong> The snapshot's logical date (2025-11-30), every freeze date, row counts, and the generated values are load-bearing: gold answers are materialized from them. Change a date and five questions' answers drift.</li>
+    <li><strong>Verify mechanically.</strong> Rebuild the snapshot, run all 50 gold queries, and byte-diff the result sets against the originals. All 50 must match exactly — values are domain-neutral by construction, so any diff means your rename map missed a reference. Then re-pin the SHA-256, strip the <code>-- TRAP</code> comments, and re-run the four example grader cases.</li>
+  </ul>
+  <p>Budget half a day. The renaming is an hour; convincing yourself the 50-for-50 diff is genuinely clean is the rest, and it is not optional.</p>
+</section>
+
+<section class="block">
+  <div class="sec-label">6 · Provenance</div>
+  <h2>Where This Courseware Came From</h2>
+  <div class="aside">
+    <span class="k">Honest provenance note</span>
+    This courseware was authored by AI agents, working from a verified research base — the site's two companion essays, <a href="../index.html">Essay № 01</a> and <a href="../course.html">Essay № 02</a>, whose claims and citations were checked against primary sources. Every code artifact was machine-tested before publication: the Lab 1 skeleton passes <code>cargo test</code>, the Lab 2 reference passes <code>go vet</code> and builds, the Lab 3 DDL and gold queries load and execute in DuckDB, and the Lab 4 simulator is deterministic by construction and verified seed-for-seed. None of that substitutes for your judgment. Machine-tested means the code runs, not that the pedagogy is right for your students; verified-base means the claims trace to sources, not that they will age well. Read every page you assign, run every lab you grade, and disagree where you disagree — then send the disagreement back. Corrections, adaptations, and new trap schemas are welcome as pull requests; the license is CC BY 4.0 precisely so this can become a course maintained by the people who teach it.
+  </div>
+  <div class="fleuron">❦</div>
+</section>
+
+<nav class="pager">
+  <a href="index.html"><span class="dir">← Back</span><span class="ttl">Course home</span></a>
+  <a class="next" href="resources.html"><span class="dir">Next →</span><span class="ttl">Resources &amp; Reading List</span></a>
+</nav>
+
+</main>
+
+<footer class="site">
+  <div class="inner">
+    <span>DATA 2027 — a course that doesn’t exist yet · <a href="../index.html">Essay № 01</a> · <a href="../course.html">Essay № 02</a></span>
+    <span>CC BY 4.0 · built with <a href="https://claude.com/claude-code">Claude Code</a></span>
+  </div>
+</footer>
+
+</body>
+</html>

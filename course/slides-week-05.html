@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Week 5 Slides: Learned Components — DATA 2027</title>
+<meta name="theme-color" content="#f6f1e7">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23f6f1e7'/%3E%3Cellipse cx='50' cy='28' rx='30' ry='12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 28v44c0 6.6 13.4 12 30 12s30-5.4 30-12V28' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 50c0 6.6 13.4 12 30 12s30-5.4 30-12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,600;9..144,900&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="deck.css">
+</head>
+<body data-week="WEEK 05">
+
+<!-- 1: title -->
+<section class="slide title-slide">
+  <div class="slide-kicker">DATA 2027 · Week 05 · Part II — New Access Methods &amp; Engines</div>
+  <h1>Learned <em>Components</em></h1>
+  <p class="sub">ML inside the engine mostly lost; ML advising the engine quietly won — and the LLM agent outside the engine is the strangest winner of all.</p>
+  <p class="course-line">Lecture 1 — The case for (and against) learned indexes · Lecture 2 — Bao: ML steering the optimizer</p>
+</section>
+
+<!-- 2: L1 divider -->
+<section class="slide section-slide">
+  <div class="slide-kicker">Lecture 1 · Tuesday</div>
+  <h2>The Case For (and Against) Learned Indexes</h2>
+  <p>What if an index is just a model — and the model class is up for debate?</p>
+</section>
+
+<!-- 3 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · The provocation</div>
+  <h2>Kraska’s thought experiment (SIGMOD 2018)</h2>
+  <div class="body">
+    <ul>
+      <li>Table holds every integer 1…100M, sorted, densely packed.</li>
+      <li>Position of key <code>k</code> is <code>k − 1</code>: one subtraction, O(1).</li>
+      <li>The B-tree spends <b>25 bytes per key</b> instead.</li>
+      <li>Plus four cache-missing pointer hops per lookup.</li>
+      <li>It is expensively rediscovering a linear function.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 4 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · The framing</div>
+  <h2>Every index is a <em>model</em> of the CDF</h2>
+  <div class="body">
+    <ul>
+      <li>Every sorted index answers one question: key → position.</li>
+      <li>That is the empirical CDF: <code>pos = F(key) · N</code>.</li>
+      <li>An index <b>is</b> a model of the data’s distribution.</li>
+      <li>The only debate: which model class to use.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 5 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · The framing</div>
+  <h2>B-trees were models all along</h2>
+  <div class="body">
+    <ul>
+      <li>Root-to-leaf traversal = a <b>piecewise-constant regression</b>.</li>
+      <li>The leaf says: scan this 4KB page.</li>
+      <li>That scan is the error bound, fixed at page size.</li>
+      <li>Error ≤ page_size after log<sub>f</sub>(N) lookups.</li>
+      <li>Hard worst case, zero training — running the world since 1971.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 6 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · The hardware bet</div>
+  <h2>Trade pointer chases for FLOPs</h2>
+  <div class="body"><div class="cols">
+    <ul>
+      <li><b>Learned:</b> two linear layers ≈ 50–100ns total.</li>
+      <li>Pure arithmetic, in registers, predictable.</li>
+    </ul>
+    <ul>
+      <li><b>Tree:</b> 3–4 pointer chases through cold DRAM.</li>
+      <li>≈ 100ns of latency <b>each</b>.</li>
+      <li>On 2018 hardware, FLOPs were nearly free.</li>
+    </ul>
+  </div></div>
+</section>
+
+<!-- 7 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · RMI</div>
+  <h2>The recursive model index</h2>
+  <div class="body">
+    <ul>
+      <li>One model over 200M keys is hopeless.</li>
+      <li><b>Stage 1:</b> one model picks <em>which stage-2 model to ask</em>.</li>
+      <li><b>Stage 2:</b> ~100,000 cheap linear models on thin slices.</li>
+      <li>Not a tree: no pointers, no traversal decisions.</li>
+      <li>Just two array indexings, two fused multiply-adds.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 8 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · RMI</div>
+  <h2>The error bound makes it correct</h2>
+  <div class="body">
+    <ul>
+      <li>At build time, record each leaf’s worst miss: <code>err_min, err_max</code>.</li>
+      <li>Lookup: predict <code>p</code>, binary-search <code>[p − err_min, p + err_max]</code>.</li>
+      <li>Worst error 128 → <b>7 comparisons</b>, one or two cache lines.</li>
+      <li>Reported: up to <b>1.5–3× faster</b> than a tuned B-tree.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 9: figure -->
+<section class="slide">
+  <div class="slide-kicker">L1 · RMI</div>
+  <h2>An index as a CDF model</h2>
+  <div class="body">
+    <figure>
+      <svg viewBox="0 0 800 360" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="An index as a model of the CDF">
+        <path d="M70 310 L70 42" fill="none" stroke="#1d1a15" stroke-width="2.5" stroke-linecap="round"/>
+        <path d="M70 310 L740 310" fill="none" stroke="#1d1a15" stroke-width="2.5" stroke-linecap="round"/>
+        <text x="380" y="345" font-family="monospace" font-size="14" fill="#1d1a15" text-anchor="middle">key</text>
+        <text x="38" y="180" font-family="monospace" font-size="14" fill="#1d1a15" text-anchor="middle" transform="rotate(-90 38 180)">position = F(key)&#183;N</text>
+        <path d="M72 306 C 140 300, 180 282, 230 262 C 270 246, 300 240, 340 224 C 400 200, 420 160, 470 138 C 510 121, 570 110, 630 84 C 680 63, 710 56, 736 48"
+              fill="none" stroke="#1d1a15" stroke-width="3" stroke-linecap="round"/>
+        <text x="330" y="186" font-family="monospace" font-size="13" fill="#1d1a15">empirical CDF (the data)</text>
+        <path d="M328 192 C 318 204, 312 212, 308 228" fill="none" stroke="#1d1a15" stroke-width="1.5" stroke-dasharray="3 4"/>
+        <path d="M72 304 L 232 258 L 342 222 L 472 134 L 632 82 L 736 50"
+              fill="none" stroke="#93321b" stroke-width="3" stroke-dasharray="9 6" stroke-linecap="round"/>
+        <text x="478" y="230" font-family="monospace" font-size="13" fill="#93321b">RMI leaf models (piecewise linear)</text>
+        <path d="M342 206 L 472 118 M342 238 L 472 150" fill="none" stroke="#93321b" stroke-width="1.5" stroke-dasharray="2 5"/>
+        <text x="560" y="120" font-family="monospace" font-size="12" fill="#93321b">&#177;err bound &#8594; binary</text>
+        <text x="560" y="136" font-family="monospace" font-size="12" fill="#93321b">search the window</text>
+        <path d="M72 308 L 150 308 L 150 286 L 230 286 L 230 262 L 310 262 L 310 238 L 390 238"
+              fill="none" stroke="#1d1a15" stroke-width="2" opacity="0.55"/>
+        <text x="120" y="270" font-family="monospace" font-size="12" fill="#1d1a15" opacity="0.75">B-tree = step-function model</text>
+        <path d="M472 310 L 472 140" fill="none" stroke="#93321b" stroke-width="1.5" stroke-dasharray="4 4"/>
+        <circle cx="472" cy="134" r="5" fill="#93321b"/>
+        <text x="466" y="328" font-family="monospace" font-size="12" fill="#93321b">k</text>
+      </svg>
+      <figcaption>Fig. 5.1 — B-tree: step function, error fixed at one page. RMI: piecewise-linear leaves plus a recorded worst-case error band.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- 10: big number -->
+<section class="slide">
+  <div class="slide-kicker">L1 · RMI</div>
+  <h2>The memory result matters more</h2>
+  <div class="body">
+    <div class="big">10–100×</div>
+    <p class="big-label">less memory than the B-tree’s index structure — an RMI over 200M doubles fits in a few megabytes, i.e., in L2.</p>
+  </div>
+</section>
+
+<!-- 11 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Updates</div>
+  <h2>Inserts break it — ALEX’s answer</h2>
+  <div class="body">
+    <ul>
+      <li>Insert one key: every position to its right shifts.</li>
+      <li><b>ALEX</b> (MSR, SIGMOD 2020): gapped arrays, leaves ~30% empty.</li>
+      <li>Model-based insertion keeps the model accurate <b>by construction</b>.</li>
+      <li>Degraded leaf? Split or retrain just that leaf.</li>
+      <li>Up to <b>4×</b> B+tree throughput on read-heavy mixes.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 12 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Updates</div>
+  <h2>PGM-index: a theorem, not a benchmark</h2>
+  <div class="body">
+    <ul>
+      <li>Ferragina &amp; Vinciguerra, VLDB 2020 — no learning at all.</li>
+      <li><b>Provably minimal</b> piecewise-linear approximation, error ≤ ε.</li>
+      <li>Built by an O(N) streaming convex-hull pass, then recurse.</li>
+      <li>B-tree-style guarantees: O(log N) lookups, fully dynamic.</li>
+      <li>Typically 10–100× smaller than the equivalent tree.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 13 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · SOSD</div>
+  <h2>SOSD: the honest scoreboard</h2>
+  <div class="body"><div class="cols">
+    <ul>
+      <li><b>Wins inside the box:</b> read-mostly, in-memory, sorted, numeric.</li>
+      <li>Often 1.5–2× faster lookups at a fraction of the space.</li>
+    </ul>
+    <ul>
+      <li><b>Strings:</b> embedding needed; comparison cost dominates.</li>
+      <li><b>Heavy updates:</b> gap maintenance, merge amortization.</li>
+      <li><b>Disk:</b> one I/O is 100µs; 200ns saved is rounding error.</li>
+    </ul>
+  </div></div>
+</section>
+
+<!-- 14 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Verdict</div>
+  <h2>What actually shipped</h2>
+  <div class="body">
+    <ul>
+      <li>Not “replaces B-trees” — a better <b>node layout</b> for a bounded regime.</li>
+      <li>Google: learned indexes in Bigtable’s SSTable block indexes.</li>
+      <li>Exactly the regime SOSD identified: read-only, sorted, in-memory.</li>
+      <li>The lasting gift was the <b>framing</b>, not the neural nets.</li>
+      <li>It let Ferragina build the PGM with zero machine learning.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 15: L2 divider -->
+<section class="slide section-slide">
+  <div class="slide-kicker">Lecture 2 · Thursday</div>
+  <h2>Bao: ML Steering the Optimizer</h2>
+  <p>Replace the optimizer, or advise it? The answer decided what shipped.</p>
+</section>
+
+<!-- 16: big number -->
+<section class="slide">
+  <div class="slide-kicker">L2 · The opening</div>
+  <h2>The estimates are fiction</h2>
+  <div class="body">
+    <div class="big">10⁴–10⁸×</div>
+    <p class="big-label">PostgreSQL’s cardinality errors on Join Order Benchmark multi-joins (Leis et al., VLDB 2015) — independence and uniformity assumptions collapse under correlated predicates.</p>
+  </div>
+</section>
+
+<!-- 17 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Learned cardinalities</div>
+  <h2>Attack one: learn better estimates</h2>
+  <div class="body">
+    <ul>
+      <li><b>MSCN:</b> supervised set-convolutions over query features.</li>
+      <li><b>DeepDB:</b> sum-product networks over the data itself.</li>
+      <li><b>NeuroCard:</b> join-aware autoregressive models.</li>
+      <li>Median q-error: hundreds → single digits, in the lab.</li>
+      <li>And yet: none ship in a major engine’s hot path.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 18 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Learned cardinalities</div>
+  <h2>The failure triangle</h2>
+  <div class="body">
+    <ul>
+      <li><b>Tail risk:</b> one 10⁶× hallucination = one catastrophic plan a day.</li>
+      <li><b>Drift:</b> trained on yesterday; <code>ANALYZE</code> rebuilds a histogram cheaply.</li>
+      <li><b>Inference placement:</b> no 5ms model call to plan a 2ms query.</li>
+      <li>Bao is engineered point-by-point against this triangle.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 19 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Neo</div>
+  <h2>Neo: replace the optimizer</h2>
+  <div class="body">
+    <ul>
+      <li>End-to-end learned optimizer (VLDB 2019): tree-conv value network, best-first search.</li>
+      <li>Bootstrapped from PostgreSQL’s plans, then improved past them.</li>
+      <li>~One day of training to match commercial optimizers.</li>
+      <li>But: cold start, drift brittleness, unbounded action space.</li>
+      <li>And zero explainability when a plan goes wrong.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 20 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Bao</div>
+  <h2>Bao: steer, don’t replace</h2>
+  <div class="body">
+    <ul>
+      <li>SIGMOD 2021, Best Paper — a deliberate retreat.</li>
+      <li>Doesn’t generate plans: picks among <b>48 hint sets</b>.</li>
+      <li>Hint sets = planner switches: <code>enable_hashjoin</code>, <code>enable_nestloop</code>, …</li>
+      <li>Tree-convolutional value model predicts each candidate plan’s latency.</li>
+      <li>Thompson-sampling bandit: a principled price for continued learning.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 21: figure -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Bao</div>
+  <h2>The Bao loop</h2>
+  <div class="body">
+    <figure>
+      <svg viewBox="0 0 800 360" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Bao steering the classical optimizer">
+        <rect x="30" y="150" width="110" height="56" fill="none" stroke="#1d1a15" stroke-width="2.5"/>
+        <text x="85" y="183" font-family="monospace" font-size="14" fill="#1d1a15" text-anchor="middle">query</text>
+        <path d="M140 178 L 192 178" fill="none" stroke="#1d1a15" stroke-width="2"/>
+        <path d="M192 178 l -9 -5 v 10 z" fill="#1d1a15"/>
+        <rect x="196" y="138" width="170" height="80" fill="none" stroke="#1d1a15" stroke-width="2.5"/>
+        <text x="281" y="172" font-family="monospace" font-size="14" fill="#1d1a15" text-anchor="middle">classical</text>
+        <text x="281" y="192" font-family="monospace" font-size="14" fill="#1d1a15" text-anchor="middle">optimizer</text>
+        <text x="281" y="120" font-family="monospace" font-size="13" fill="#93321b" text-anchor="middle">&#215; 48 hint sets</text>
+        <path d="M281 126 L 281 134" fill="none" stroke="#93321b" stroke-width="1.5" stroke-dasharray="3 3"/>
+        <path d="M366 162 L 428 96 M366 178 L 428 178 M366 194 L 428 262" fill="none" stroke="#1d1a15" stroke-width="1.8"/>
+        <rect x="432" y="74" width="120" height="42" fill="none" stroke="#1d1a15" stroke-width="2"/>
+        <text x="492" y="100" font-family="monospace" font-size="13" fill="#1d1a15" text-anchor="middle">plan 1</text>
+        <rect x="432" y="157" width="120" height="42" fill="none" stroke="#1d1a15" stroke-width="2"/>
+        <text x="492" y="183" font-family="monospace" font-size="13" fill="#1d1a15" text-anchor="middle">plan 2</text>
+        <rect x="432" y="240" width="120" height="42" fill="none" stroke="#1d1a15" stroke-width="2"/>
+        <text x="492" y="266" font-family="monospace" font-size="13" fill="#1d1a15" text-anchor="middle">&#8230; plan 48</text>
+        <path d="M552 95 L 606 158 M552 178 L 606 178 M552 261 L 606 198" fill="none" stroke="#93321b" stroke-width="1.8"/>
+        <rect x="610" y="138" width="160" height="80" fill="none" stroke="#93321b" stroke-width="3"/>
+        <text x="690" y="166" font-family="monospace" font-size="13" fill="#93321b" text-anchor="middle">tree-conv</text>
+        <text x="690" y="184" font-family="monospace" font-size="13" fill="#93321b" text-anchor="middle">value model:</text>
+        <text x="690" y="202" font-family="monospace" font-size="13" fill="#93321b" text-anchor="middle">execute best</text>
+        <path d="M690 218 C 690 310, 380 326, 286 232" fill="none" stroke="#93321b" stroke-width="2" stroke-dasharray="6 5"/>
+        <path d="M286 232 l 1 11 l 9 -7 z" fill="#93321b"/>
+        <text x="490" y="318" font-family="monospace" font-size="13" fill="#93321b" text-anchor="middle">observed latency &#8594; Thompson sampling &#8594; retrain in minutes</text>
+        <text x="492" y="44" font-family="monospace" font-size="13" fill="#1d1a15" text-anchor="middle">every arm = a valid, costed, classical plan</text>
+      </svg>
+      <figcaption>Fig. 5.2 — Bao never generates plans: it picks 1 of 48 hint sets, and the classical optimizer does the rest.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- 22 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Bao</div>
+  <h2>The triangle, amputated</h2>
+  <div class="body">
+    <ul>
+      <li><b>Tail risk:</b> worst case is “PostgreSQL on an off day,” not chaos.</li>
+      <li><b>Cold start:</b> the empty hint set <em>is</em> PostgreSQL — day one = status quo.</li>
+      <li><b>Drift:</b> a 48-way choice retrains in minutes on one GPU.</li>
+      <li>Cuts tail (p99) latencies substantially; reduces cloud cost.</li>
+      <li>Shipped in spirit: Microsoft’s Auto-Steer, follow-ons at Meta.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 23: table -->
+<section class="slide">
+  <div class="slide-kicker">L2 · The pattern</div>
+  <h2>Where the ML sits decides the fate</h2>
+  <div class="body">
+    <table>
+      <thead>
+        <tr><th>System</th><th>Where the ML sits</th><th>Worst case</th><th>Fate</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><b>Neo</b> (VLDB ’19)</td><td>Replaces the optimizer</td><td>Arbitrarily bad plan</td><td>Influential; never deployed as-is</td></tr>
+        <tr><td><b>Bao</b> (SIGMOD ’21)</td><td>Advises: 1 of 48 hint sets</td><td>A valid classical plan</td><td>Pattern adopted (Auto-Steer &amp; kin)</td></tr>
+        <tr><td><b>OtterTune</b> (’17–’23)</td><td>Outside, tuning knobs</td><td>Bad config (recoverable)</td><td>Good tech, dead company (2023)</td></tr>
+        <tr><td><b>LLM-DBA via MCP</b></td><td>Outside, as a client</td><td>Whatever you let it execute</td><td>The current frontier</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- 24 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · SageDB</div>
+  <h2>SageDB: the manifesto vs. the shipping list</h2>
+  <div class="body">
+    <ul>
+      <li>CIDR 2019: <em>every</em> component learned — the “instance-optimal” system.</li>
+      <li>Never arrived as a system; the shipped pieces are the lesson.</li>
+      <li>Redshift: learned table optimization, workload management, short-query classifier.</li>
+      <li>All advisory, off the critical path — wrong answers never break correctness.</li>
+      <li>Learned sort and learned join? Nowhere in production.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 25 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · SageDB</div>
+  <h2>The physics separation</h2>
+  <div class="body">
+    <ul>
+      <li>ML is excellent at <b>policies</b>: what to do, given this workload.</li>
+      <li>ML is dangerous at <b>mechanisms</b>: doing it correctly under all inputs.</li>
+      <li>Every survivor is a policy decision feeding a classical mechanism.</li>
+      <li>Made asynchronously, where errors degrade performance, not correctness.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 26 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · OtterTune</div>
+  <h2>OtterTune: the product-shape autopsy</h2>
+  <div class="body">
+    <ul>
+      <li>CMU research (SIGMOD 2017): Bayesian optimization over config knobs.</li>
+      <li>Sound research, real funding — shut down mid-2023.</li>
+      <li><b>Bounded upside:</b> a great config buys 20–50%, once.</li>
+      <li><b>Absorbed:</b> Aurora and Azure auto-tune for free.</li>
+      <li>Customers wanted a <b>recommendation with an explanation</b>, not autonomy.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 27: big number -->
+<section class="slide">
+  <div class="slide-kicker">L2 · History</div>
+  <h2>Self-tuning is not a 2018 idea</h2>
+  <div class="body">
+    <div class="big">1998</div>
+    <p class="big-label">SQL Server 7.0 ships the Index Tuning Wizard. IBM’s LEO was Bao’s feedback loop twenty years early — turned off because customers feared plan instability. The binding constraint is operator trust, not model accuracy.</p>
+  </div>
+</section>
+
+<!-- 28 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · The inversion</div>
+  <h2>The learned component moved <em>outside</em></h2>
+  <div class="body">
+    <ul>
+      <li>The strongest learned component in 2026 is an LLM <b>client</b>, over MCP.</li>
+      <li>Holds <code>EXPLAIN ANALYZE</code>, <code>pg_stat_statements</code>, schema in context.</li>
+      <li>Structurally what OtterTune’s customers asked for: an advisor that explains.</li>
+      <li>Inherits Bao’s safety contract — <em>if</em> the tool surface is designed right.</li>
+      <li>Engines must now be <b>legible</b>: rich EXPLAIN, dry-run DDL, guarded hints.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 29: quote -->
+<section class="slide quote-slide">
+  <div class="q">The systems that shipped all share one clause in their contract: <b>the model advises, the engine decides.</b></div>
+  <cite>— Week 5 lecture notes, DATA 2027</cite>
+</section>
+
+<!-- 30: checkpoint -->
+<section class="slide">
+  <div class="slide-kicker">Checkpoint · Discussion</div>
+  <h2>Before you leave</h2>
+  <div class="body">
+    <ul>
+      <li>Two-stage RMI over 200M keys: footprint vs. a fanout-256 B+tree? Which dataset property blows up a linear leaf? (Ex 5.1)</li>
+      <li>Mini-Bao, four hint sets, 20 queries: how much regret does always-default leave on the table? (Ex 5.2)</li>
+      <li>An LLM-DBA over MCP: what is the formal analogue of Bao’s “every arm is a classical plan” floor? (Ex 5.3)</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 31: readings -->
+<section class="slide">
+  <div class="slide-kicker">Readings · Week 05</div>
+  <h2>Read before Thursday</h2>
+  <div class="body">
+    <ul>
+      <li><b>The Case for Learned Index Structures</b> — Kraska et al., SIGMOD 2018. §1–3 closely; bring one benchmark objection.</li>
+      <li><b>Bao: Making Learned Query Optimization Practical</b> — Marcus et al., SIGMOD 2021. §2 constraints + the Thompson-sampling loop.</li>
+      <li><b>SageDB: A Learned Database System</b> — Kraska et al., CIDR 2019. Mark each component policy or mechanism; check against Redshift.</li>
+    </ul>
+  </div>
+</section>
+
+<script src="deck.js"></script>
+</body>
+</html>

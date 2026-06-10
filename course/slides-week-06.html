@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Week 6 Slides: Vector Indexes Are Access Methods, Not Products — DATA 2027</title>
+<meta name="theme-color" content="#f6f1e7">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23f6f1e7'/%3E%3Cellipse cx='50' cy='28' rx='30' ry='12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 28v44c0 6.6 13.4 12 30 12s30-5.4 30-12V28' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 50c0 6.6 13.4 12 30 12s30-5.4 30-12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,600;9..144,900&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="deck.css">
+</head>
+<body data-week="WEEK 06">
+
+<!-- 1: title -->
+<section class="slide title-slide">
+  <div class="slide-kicker">DATA 2027 · Week 06 · Part II — New Access Methods &amp; Engines</div>
+  <h1>Vector Indexes Are <em>Access</em> Methods, Not Products</h1>
+  <p class="sub">The industry sold approximate nearest-neighbor search as a new category of database. It isn’t one — it’s an index, and we treat it with B-tree rigor.</p>
+  <p class="course-line">Lecture 1 — ANN Search: IVF, PQ, HNSW · Lecture 2 — DiskANN and the Recall Axis</p>
+</section>
+
+<!-- 2: L1 divider -->
+<section class="slide section-slide">
+  <div class="slide-kicker">Lecture 1 · Tuesday</div>
+  <h2>ANN Search: IVF, PQ, HNSW</h2>
+  <p>Three ideas underlie essentially every ANN index in production — and each trades something away.</p>
+</section>
+
+<!-- 3 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · The Query</div>
+  <h2>Every agent issues the same query</h2>
+  <div class="body">
+    <ul>
+      <li><em>Given this embedding, find the k most similar among N.</em></li>
+      <li>Agent memory <b>is</b> this query. RAG is this query.</li>
+      <li>Tool retrieval, dedup, semantic caching — same query.</li>
+      <li>Plausibly the most-executed access pattern in new systems.</li>
+      <li>Relational engines never had a native index for it.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 4 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Brute Force</div>
+  <h2>The exact-kNN invoice</h2>
+  <div class="body">
+    <ul>
+      <li>N = 100M vectors, d = 768 floats: <b>307 GB</b> raw.</li>
+      <li>One exact query: 100M dot products ≈ <b>77 GFLOPs</b>.</li>
+      <li>At ~50 GB/s bandwidth: <b>six seconds per query</b>.</li>
+      <li>Before you’ve served a second user.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 5: big number -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Curse of Dimensionality</div>
+  <h2>Concentration of distances</h2>
+  <div class="body">
+    <div class="big">99%</div>
+    <p class="big-label">of a unit ball’s volume at d = 768 lies in the outer 1% of radius. Everything is “far,” by roughly the same amount — so pruning indexes (kd-trees, R-trees) can’t exclude anything and degenerate to a scan.</p>
+  </div>
+</section>
+
+<!-- 6 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · The Unlock</div>
+  <h2>The great surrender</h2>
+  <div class="body">
+    <ul>
+      <li>d<sub>max</sub>/d<sub>min</sub> → 1: branch-and-bound can’t prune.</li>
+      <li>A kd-tree on 768-dim data visits nearly every leaf.</li>
+      <li>So: <b>stop demanding the true neighbor</b>.</li>
+      <li>Accept <b>recall@k</b> — fraction of true top-k returned — as a dial.</li>
+      <li>Orders of magnitude appear.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 7 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · IVF</div>
+  <h2>IVF: k-means wearing a database hat</h2>
+  <div class="body">
+    <ul>
+      <li>Offline: cluster into <code>nlist</code> ≈ √N centroids (~10,000 for 100M).</li>
+      <li>Each vector filed in a posting list — “shard by meaning.”</li>
+      <li>Query: compare to 10,000 centroids, not 100M vectors.</li>
+      <li>Scan only the closest <code>nprobe</code> lists.</li>
+      <li><code>nprobe</code> = 10 of 10,000 → scan ~0.1%: a <b>1000× reduction</b>.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 8 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · IVF</div>
+  <h2>The edge problem is the dial</h2>
+  <div class="body"><div class="cols">
+    <ul>
+      <li>Queries near Voronoi boundaries miss neighbors in unprobed cells.</li>
+      <li>Recall@10: <b>40%</b> at <code>nprobe</code> = 1, <b>95%</b> at <code>nprobe</code> = 64.</li>
+      <li>Monotone: more probes, more recall, more time.</li>
+    </ul>
+    <ul>
+      <li>What IVF does <b>not</b> fix: lists hold raw floats.</li>
+      <li>100M × 768d is still 307 GB somewhere.</li>
+      <li>That’s the problem PQ attacks.</li>
+    </ul>
+  </div></div>
+</section>
+
+<!-- 9: big number -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Product Quantization</div>
+  <h2>PQ compression</h2>
+  <div class="body">
+    <div class="big">32×</div>
+    <p class="big-label">A 128-dim float vector (512 bytes) becomes 16 bytes: m = 16 subvectors of 8 dims, each encoded by an 8-bit codebook of 256 k-means centroids. The Cartesian-product trick: 256<sup>16</sup> = 2<sup>128</sup> representable points from ≈131 KB of stored centroids. Jégou, Douze &amp; Schmid, TPAMI 2011.</p>
+  </div>
+</section>
+
+<!-- 11 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Product Quantization</div>
+  <h2>Distance without multiplies</h2>
+  <div class="body">
+    <ul>
+      <li>Per query: precompute a 16 × 256 table of subspace distances.</li>
+      <li>Distance to any candidate: <b>16 lookups + 15 adds</b>.</li>
+      <li>Scans become bandwidth-bound on 16-byte codes, not 512-byte vectors.</li>
+      <li>Price: <b>distortion</b> — PQ distances are biased estimates.</li>
+      <li>Remedy: fetch ~200 candidates cheap, <b>re-rank</b> exactly. FAISS IVFADC quantizes residuals.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 12 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Field Note</div>
+  <h2>What an unindexed scan costs</h2>
+  <div class="body"><div class="cols">
+    <ul>
+      <li>400M × 1536-dim raw embeddings, brute-forced on GPUs.</li>
+      <li>Monthly bill exceeded the replacing engineer’s salary.</li>
+      <li>Nobody asked “what is the access method here?”</li>
+    </ul>
+    <ul>
+      <li>After IVF-PQ: <b>2.4 TB → 38 GB</b> of codes.</li>
+      <li>p99: <b>1.8 s → 19 ms</b>.</li>
+      <li>At recall@10 = 0.96.</li>
+    </ul>
+  </div></div>
+</section>
+
+<!-- 13: figure -->
+<section class="slide">
+  <div class="slide-kicker">L1 · HNSW</div>
+  <h2>A skip list, generalized to a metric space</h2>
+  <div class="body">
+    <figure>
+      <svg viewBox="0 0 800 360" preserveAspectRatio="xMidYMid meet" role="img" aria-label="HNSW layered graph with a greedy search path descending from sparse top layer to dense bottom layer">
+        <style>text { font-family: 'IBM Plex Mono', monospace; fill: #1d1a15; }</style>
+        <line x1="60" y1="70" x2="740" y2="62" stroke="#1d1a15" stroke-width="1" stroke-dasharray="2 5" opacity=".5"/>
+        <line x1="60" y1="185" x2="740" y2="178" stroke="#1d1a15" stroke-width="1" stroke-dasharray="2 5" opacity=".5"/>
+        <line x1="60" y1="300" x2="740" y2="294" stroke="#1d1a15" stroke-width="1" stroke-dasharray="2 5" opacity=".5"/>
+        <text x="62" y="44" font-size="12">layer 2 · sparse · highways</text>
+        <text x="62" y="159" font-size="12">layer 1</text>
+        <text x="62" y="274" font-size="12">layer 0 · all N nodes · efSearch beam</text>
+        <circle cx="130" cy="68" r="9" fill="none" stroke="#93321b" stroke-width="2.5"/>
+        <circle cx="430" cy="62" r="7" fill="none" stroke="#1d1a15" stroke-width="2"/>
+        <circle cx="660" cy="66" r="7" fill="none" stroke="#1d1a15" stroke-width="2"/>
+        <path d="M139 67 Q 280 52 423 62" fill="none" stroke="#1d1a15" stroke-width="1.4"/>
+        <path d="M437 62 Q 545 78 653 66" fill="none" stroke="#1d1a15" stroke-width="1.4"/>
+        <text x="98" y="98" font-size="11" fill="#93321b">entry</text>
+        <circle cx="130" cy="182" r="6" fill="none" stroke="#1d1a15" stroke-width="2"/>
+        <circle cx="300" cy="190" r="6" fill="none" stroke="#1d1a15" stroke-width="2"/>
+        <circle cx="430" cy="178" r="7" fill="none" stroke="#93321b" stroke-width="2.5"/>
+        <circle cx="560" cy="188" r="6" fill="none" stroke="#1d1a15" stroke-width="2"/>
+        <circle cx="660" cy="180" r="6" fill="none" stroke="#1d1a15" stroke-width="2"/>
+        <path d="M136 182 Q 215 170 294 189" fill="none" stroke="#1d1a15" stroke-width="1.2"/>
+        <path d="M306 189 Q 365 196 423 179" fill="none" stroke="#1d1a15" stroke-width="1.2"/>
+        <path d="M437 179 Q 500 168 554 187" fill="none" stroke="#1d1a15" stroke-width="1.2"/>
+        <path d="M566 187 Q 615 194 654 181" fill="none" stroke="#1d1a15" stroke-width="1.2"/>
+        <circle cx="110" cy="298" r="5" fill="none" stroke="#1d1a15" stroke-width="1.8"/>
+        <circle cx="190" cy="306" r="5" fill="none" stroke="#1d1a15" stroke-width="1.8"/>
+        <circle cx="265" cy="294" r="5" fill="none" stroke="#1d1a15" stroke-width="1.8"/>
+        <circle cx="340" cy="304" r="5" fill="none" stroke="#1d1a15" stroke-width="1.8"/>
+        <circle cx="430" cy="296" r="6" fill="none" stroke="#93321b" stroke-width="2.5"/>
+        <circle cx="510" cy="305" r="5" fill="none" stroke="#1d1a15" stroke-width="1.8"/>
+        <circle cx="585" cy="293" r="6" fill="none" stroke="#93321b" stroke-width="2.5"/>
+        <circle cx="660" cy="302" r="5" fill="none" stroke="#1d1a15" stroke-width="1.8"/>
+        <circle cx="725" cy="296" r="5" fill="none" stroke="#1d1a15" stroke-width="1.8"/>
+        <path d="M115 298 Q 150 290 185 305" fill="none" stroke="#1d1a15" stroke-width="1.1"/>
+        <path d="M195 305 Q 228 296 260 295" fill="none" stroke="#1d1a15" stroke-width="1.1"/>
+        <path d="M270 295 Q 303 302 335 303" fill="none" stroke="#1d1a15" stroke-width="1.1"/>
+        <path d="M345 303 Q 385 292 424 296" fill="none" stroke="#1d1a15" stroke-width="1.1"/>
+        <path d="M436 296 Q 471 304 505 304" fill="none" stroke="#1d1a15" stroke-width="1.1"/>
+        <path d="M515 304 Q 548 294 579 294" fill="none" stroke="#1d1a15" stroke-width="1.1"/>
+        <path d="M591 294 Q 624 300 655 301" fill="none" stroke="#1d1a15" stroke-width="1.1"/>
+        <path d="M665 301 Q 693 294 720 296" fill="none" stroke="#1d1a15" stroke-width="1.1"/>
+        <path d="M132 78 Q 270 110 425 70" fill="none" stroke="#93321b" stroke-width="2.5" stroke-dasharray="7 5"/>
+        <path d="M430 70 L 430 169" fill="none" stroke="#93321b" stroke-width="2.5" stroke-dasharray="7 5"/>
+        <path d="M430 187 L 430 288" fill="none" stroke="#93321b" stroke-width="2.5" stroke-dasharray="7 5"/>
+        <path d="M437 297 Q 510 320 578 296" fill="none" stroke="#93321b" stroke-width="2.5" stroke-dasharray="7 5"/>
+        <path d="M578 296 l -12 -3 m 12 3 l -10 7" stroke="#93321b" stroke-width="2.5" fill="none"/>
+        <text x="600" y="335" font-size="12" fill="#93321b">★ query’s true neighbor</text>
+        <text x="455" y="130" font-size="11" fill="#93321b">greedy descent</text>
+      </svg>
+      <figcaption>Fig. 6.1 — HNSW search: enter sparse top layer, greedy-walk highways, drop a layer when stalled, finish with an efSearch-wide beam on layer 0.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- 14 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · HNSW</div>
+  <h2>Why the walk doesn’t get stuck</h2>
+  <div class="body">
+    <ul>
+      <li>Each node links to ~M near neighbors (M = 16–32).</li>
+      <li><b>Navigability</b>: diversity heuristic keeps long-range highways, not M redundant short edges.</li>
+      <li><b>Hierarchy</b>: layer drawn geometrically, P(layer ≥ ℓ) = e<sup>−ℓ/m<sub>L</sub></sup>.</li>
+      <li>Each layer up has ~1/e the nodes — coarse hops first.</li>
+      <li>Expected logarithmic search depth survives. Malkov &amp; Yashunin, TPAMI 2018.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 15 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · HNSW</div>
+  <h2>Two knobs govern everything</h2>
+  <div class="body"><div class="cols">
+    <ul>
+      <li><code>efConstruction</code> (100–500): build-time beam.</li>
+      <li>Bigger → better edges, slower builds.</li>
+    </ul>
+    <ul>
+      <li><code>efSearch</code>: query-time beam on layer 0.</li>
+      <li>10 → recall 0.80 in <b>30 µs</b>; 200 → 0.99 in <b>400 µs</b>.</li>
+      <li>It’s <code>nprobe</code> in graph clothes — every ANN family has one such dial.</li>
+    </ul>
+  </div></div>
+</section>
+
+<!-- 16: big number -->
+<section class="slide">
+  <div class="slide-kicker">L1 · HNSW’s Sin</div>
+  <h2>Everything lives in RAM</h2>
+  <div class="body">
+    <div class="big">350 GB</div>
+    <p class="big-label">DRAM for one replica of 100M × 768d: 307 GB of full-precision vectors + ~13 GB of graph edges + allocator overhead. DRAM costs ~20× NVMe per byte — that gap is why Thursday’s lecture exists.</p>
+  </div>
+</section>
+
+<!-- 17: L2 divider -->
+<section class="slide section-slide">
+  <div class="slide-kicker">Lecture 2 · Thursday</div>
+  <h2>DiskANN and the Recall Axis</h2>
+  <p>The impolite question of 2019: what if the graph lived on SSD?</p>
+</section>
+
+<!-- 18: big number -->
+<section class="slide">
+  <div class="slide-kicker">L2 · DiskANN</div>
+  <h2>One node, one billion vectors</h2>
+  <div class="body">
+    <div class="big">~5 ms</div>
+    <p class="big-label">DiskANN (Microsoft Research, 2019): a single 64 GB-RAM machine with an NVMe drive serves a billion vectors at 95%+ recall. The 2019 baseline was a DRAM cluster an order of magnitude more expensive.</p>
+  </div>
+</section>
+
+<!-- 19 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Vamana</div>
+  <h2>A flatter graph, built for blocks</h2>
+  <div class="body">
+    <ul>
+      <li>Drops HNSW’s hierarchy: one flat graph, fixed medoid entry.</li>
+      <li>α-pruning (α = 1.2) keeps <b>aggressive long-range shortcuts</b>.</li>
+      <li>Payoff: fewer hops — on SSD, hops are the cost model.</li>
+      <li>SSD read ~100 µs vs DRAM ~100 ns: <b>1000× worse</b>.</li>
+      <li>Same B-tree lesson: access count dominates when storage is slow.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 20: figure -->
+<section class="slide">
+  <div class="slide-kicker">L2 · DiskANN</div>
+  <h2>PQ steers in RAM, SSD stores the truth</h2>
+  <div class="body">
+    <figure>
+      <svg viewBox="0 0 800 360" preserveAspectRatio="xMidYMid meet" role="img" aria-label="DiskANN split design: PQ codes in RAM steer the walk, SSD blocks hold full vectors plus adjacency lists">
+        <style>text { font-family: 'IBM Plex Mono', monospace; fill: #1d1a15; }</style>
+        <!-- RAM box -->
+        <rect x="60" y="60" width="280" height="240" fill="none" stroke="#1d1a15" stroke-width="2"/>
+        <text x="75" y="44" font-size="13">RAM · ~32 GB for 1B vectors</text>
+        <text x="80" y="95" font-size="12" fill="#93321b">PQ codes · ~32 B each</text>
+        <rect x="80" y="112" width="110" height="20" fill="none" stroke="#93321b" stroke-width="1.6"/>
+        <rect x="80" y="142" width="110" height="20" fill="none" stroke="#93321b" stroke-width="1.6"/>
+        <rect x="80" y="172" width="110" height="20" fill="none" stroke="#93321b" stroke-width="1.6"/>
+        <rect x="80" y="202" width="110" height="20" fill="none" stroke="#93321b" stroke-width="1.6"/>
+        <text x="205" y="127" font-size="11">cheap, slightly</text>
+        <text x="205" y="143" font-size="11">wrong distances</text>
+        <text x="80" y="265" font-size="12">navigation runs here</text>
+        <!-- SSD box -->
+        <rect x="460" y="60" width="280" height="240" fill="none" stroke="#1d1a15" stroke-width="2"/>
+        <text x="475" y="44" font-size="13">SSD · graph + full vectors</text>
+        <rect x="480" y="90" width="240" height="56" fill="none" stroke="#1d1a15" stroke-width="1.6"/>
+        <text x="492" y="113" font-size="11">4 KB block = full vector</text>
+        <text x="492" y="131" font-size="11">+ adjacency list together</text>
+        <rect x="480" y="160" width="240" height="56" fill="none" stroke="#1d1a15" stroke-width="1.6"/>
+        <text x="492" y="183" font-size="11">one read → geometry</text>
+        <text x="492" y="201" font-size="11">+ next hops</text>
+        <text x="480" y="265" font-size="12">consulted along the path</text>
+        <!-- arrows -->
+        <path d="M345 150 L 452 150" stroke="#93321b" stroke-width="2.5" fill="none"/>
+        <path d="M452 150 l -14 -7 m 14 7 l -14 7" stroke="#93321b" stroke-width="2.5" fill="none"/>
+        <text x="352" y="138" font-size="11" fill="#93321b">beam W = 4–8 reads</text>
+        <path d="M452 230 L 345 230" stroke="#93321b" stroke-width="2.5" fill="none"/>
+        <path d="M345 230 l 14 -7 m -14 7 l 14 7" stroke="#93321b" stroke-width="2.5" fill="none"/>
+        <text x="352" y="252" font-size="11" fill="#93321b">final candidates →</text>
+        <text x="352" y="268" font-size="11" fill="#93321b">exact re-rank</text>
+        <text x="60" y="338" font-size="12">~10 rounds × 4 parallel 4 KB reads ≈ 40 I/Os ≈ 1–4 ms</text>
+      </svg>
+      <figcaption>Fig. 6.2 — DiskANN’s split: PQ demoted from index to steering mechanism; the exact re-rank at the end repairs its distortion.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- 21 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Beam Search</div>
+  <h2>Hiding SSD latency</h2>
+  <div class="body">
+    <ul>
+      <li>NVMe gives huge random IOPS — but only at queue depth.</li>
+      <li>Beam width W = 4–8: issue W adjacency reads concurrently.</li>
+      <li>Cuts wall-clock hops nearly W-fold.</li>
+      <li>Representative query: ~40 I/Os ≈ <b>1–4 ms</b>; PQ arithmetic free beside it.</li>
+      <li>Billion-scale, one node, five milliseconds, recall 0.95.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 22 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Historical Aside</div>
+  <h2>The arc rhymes with 1970s hashing</h2>
+  <div class="body">
+    <ul>
+      <li>Early hash tables assumed memory; databases needed disk.</li>
+      <li>Linear &amp; extendible hashing (1979–80): re-derived under “one I/O per lookup.”</li>
+      <li>DiskANN: the same move for similarity graphs.</li>
+      <li>The access-method playbook hasn’t changed in fifty years.</li>
+      <li>Only the query has.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 23 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Updates</div>
+  <h2>Graphs hate deletes</h2>
+  <div class="body">
+    <ul>
+      <li>Removing a node can sever the only navigable path.</li>
+      <li>In-place edge repair under live queries: concurrency nightmare.</li>
+      <li>FreshDiskANN (2021): inserts go to a small in-RAM Vamana.</li>
+      <li>Deletes → <b>tombstones</b>: still traversed, filtered from results.</li>
+      <li>Background merge excises tombstones, repairs edges with α-prune.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 24 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Convergence</div>
+  <h2>Read it back slowly: that’s an LSM-tree</h2>
+  <div class="body">
+    <ul>
+      <li>Write-optimized RAM delta + deletion markers + background compaction.</li>
+      <li>Lucene/Elasticsearch: HNSW per immutable segment, rebuild at merge.</li>
+      <li>pgvector: Postgres heap pages, MVCC versions, vacuum reclaims.</li>
+      <li>Three independent codebases, one shape: <b>immutable units + tombstones + merge</b>.</li>
+      <li>When every lineage converges, it’s physics, not fashion.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 25 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · The Recall Axis</div>
+  <h2>RUM grows a fourth axis</h2>
+  <div class="body">
+    <ul>
+      <li>RUM: balance Read, Update, Memory — optimize two, pay the third.</li>
+      <li>ANN adds <b>Recall</b>: a knob turned at query time.</li>
+      <li>Same index: 0.80 at 30 µs or 0.99 at 400 µs — one integer apart.</li>
+      <li>A vector index is a <b>curve</b>, not a point.</li>
+      <li>Comparing systems at unstated recall: the benchmark fraud of our decade.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 26 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · The Recall Axis</div>
+  <h2>Recall is a budget, per query</h2>
+  <div class="body"><div class="cols">
+    <ul>
+      <li>Agent re-ranking 50 candidates via LLM: buy cheap recall-0.85, let the model absorb noise.</li>
+      <li>Exact-match memory lookup (“already filed this ticket?”): pay for 0.99+.</li>
+    </ul>
+    <ul>
+      <li>Per-query targets are an API surface.</li>
+      <li>Agents already set <code>temperature</code>.</li>
+      <li><code>min_recall</code> is the same kind of dial.</li>
+    </ul>
+  </div></div>
+</section>
+
+<!-- 27: table -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Three Families</div>
+  <h2>Pick your trade</h2>
+  <div class="body">
+    <table>
+      <thead>
+        <tr><th>Property</th><th>IVF-PQ</th><th>HNSW</th><th>DiskANN</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><b>Memory, 100M × 768d</b></td><td>~3–6 GB codes</td><td>~350 GB DRAM</td><td>~6–10 GB RAM + ~340 GB SSD</td></tr>
+        <tr><td><b>QPS / latency</b></td><td>High QPS, ~1–10 ms</td><td>10⁴–10⁵ QPS, 0.1–1 ms</td><td>~10³ QPS, 2–10 ms</td></tr>
+        <tr><td><b>Recall</b></td><td>Needs re-rank above ~0.95</td><td>0.99+ via efSearch</td><td>0.95–0.99 with re-rank</td></tr>
+        <tr><td><b>Updates</b></td><td>Appends easy; retrain on drift</td><td>Deletes poison → segment + rebuild</td><td>RAM delta + tombstones + merge</td></tr>
+        <tr><td><b>Use when</b></td><td>Huge N, tight memory</td><td>Latency is king, DRAM paid for</td><td>Billion-scale; cost is king</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- 28 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · The Agent Angle</div>
+  <h2>Vector-as-feature beat vector-as-product</h2>
+  <div class="body">
+    <ul>
+      <li>2021–23: VC funded ANN as a database <em>category</em>.</li>
+      <li>By 2025: pgvector, Elasticsearch, MongoDB, Redis, SQLite, every warehouse.</li>
+      <li>Agent retrieval never arrives alone: similarity <b>joined with</b> predicates, freshness, transactions.</li>
+      <li>Filtered ANN is open research: filter out 99% and the graph disconnects.</li>
+      <li>Solving it needs a query planner — B-trees were never a company.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 29: quote -->
+<section class="slide quote-slide">
+  <div class="q">Recall is the fourth resource. <b>You don’t maximize it — you budget it</b>, query by query, like CPU.</div>
+  <cite>— Week 6 lecture notes, DATA 2027</cite>
+</section>
+
+<!-- 30: checkpoint -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Checkpoint</div>
+  <h2>Discussion questions</h2>
+  <div class="body">
+    <ul>
+      <li>For 1B × 768d float32: raw storage, HNSW DRAM footprint (M = 32), and DiskANN’s PQ RAM at 32 B/vector — do the budgets by hand.</li>
+      <li>Where does the no-re-rank IVF-PQ recall curve plateau, and which PQ error term explains the ceiling?</li>
+      <li>Filtered ANN: as label selectivity drops 50% → 0.1%, where do post-filter and pre-filter cross — and what would an optimizer need to choose automatically?</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 31: readings -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Readings</div>
+  <h2>Read before Thursday</h2>
+  <div class="body">
+    <ul>
+      <li><b>Product Quantization for Nearest Neighbor Search</b> — Jégou, Douze &amp; Schmid, TPAMI 2011. Work §III until the 256<sup>16</sup> trick feels obvious.</li>
+      <li><b>Efficient and Robust ANN Search Using HNSW Graphs</b> — Malkov &amp; Yashunin, TPAMI 2018. Focus on Alg. 4 and layer assignment; note the memory model.</li>
+      <li><b>DiskANN: Billion-point Search on a Single Node</b> — Subramanya et al., NeurIPS 2019. Read for systems decisions: why α &gt; 1, why PQ steers while SSD stores.</li>
+    </ul>
+  </div>
+</section>
+
+<script src="deck.js"></script>
+</body>
+</html>

@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Week 7 Slides: The Lakehouse &amp; Open Formats — DATA 2027</title>
+<meta name="theme-color" content="#f6f1e7">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23f6f1e7'/%3E%3Cellipse cx='50' cy='28' rx='30' ry='12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 28v44c0 6.6 13.4 12 30 12s30-5.4 30-12V28' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 50c0 6.6 13.4 12 30 12s30-5.4 30-12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,600;9..144,900&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="deck.css">
+</head>
+<body data-week="WEEK 07">
+
+<!-- 1: title -->
+<section class="slide title-slide">
+  <div class="slide-kicker">DATA 2027 · Week 07 · Part II — New Access Methods &amp; Engines</div>
+  <h1>The Lakehouse &amp; <em>Open</em> Formats</h1>
+  <p class="sub">The database disaggregated itself: storage became Parquet on S3, the table became a tree of metadata files, and the engine became a replaceable visitor.</p>
+  <p class="course-line">Lecture 1 — Iceberg Internals: The Metadata Tree · Lecture 2 — Photon and Engines Over Open Files</p>
+</section>
+
+<!-- 2: L1 divider -->
+<section class="slide section-slide">
+  <div class="slide-kicker">Lecture 1 · Tuesday</div>
+  <h2>Iceberg Internals: The Metadata Tree</h2>
+  <p>How a pile of immutable files acquires ACID semantics.</p>
+</section>
+
+<!-- 3 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · The failure that made the field</div>
+  <h2>Before 2018: a “table” was a convention</h2>
+  <div class="body">
+    <ul>
+      <li>A directory, with subdirectories encoding partitions: <code>dt=2026-06-09/region=eu/</code></li>
+      <li>A metastore row points at the root</li>
+      <li>The file set = <b>whatever a LIST returns right now</b></li>
+      <li>Hive isn’t a bad database — it is <b>not a database</b></li>
+    </ul>
+  </div>
+</section>
+
+<!-- 4: big number -->
+<section class="slide">
+  <div class="slide-kicker">L1 · The failure that made the field</div>
+  <h2>Planning by directory listing</h2>
+  <div class="body">
+    <div class="big">1,000</div>
+    <p class="big-label">keys per S3 LIST call — so planning a query over a 1M-file table costs ~1,000 sequential API round-trips: tens of seconds before a single byte of data is read.</p>
+  </div>
+</section>
+
+<!-- 5 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · The failure that made the field</div>
+  <h2>ACID dies on a directory listing</h2>
+  <div class="body">
+    <ul>
+      <li><b>Atomicity:</b> an 800-file write appears 1 file at a time</li>
+      <li>Readers see torn writes for minutes</li>
+      <li><b>Consistency:</b> S3 listings were eventually consistent for years</li>
+      <li><b>Isolation:</b> none — <code>INSERT OVERWRITE</code> deletes files under running queries</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 6 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Iceberg’s move</div>
+  <h2>Define the table by a tree, not a place</h2>
+  <div class="body">
+    <ul>
+      <li>Ryan Blue’s team at Netflix, 2018</li>
+      <li>Stop defining a table by <b>where its files live</b></li>
+      <li>Define it by a persistent, immutable <b>metadata tree</b></li>
+      <li>The root is a single swappable pointer</li>
+      <li>The catalog is the <b>only mutable thing</b> in the system</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 7: figure -->
+<section class="slide">
+  <div class="slide-kicker">L1 · The tree, level by level</div>
+  <h2>The Iceberg metadata tree</h2>
+  <div class="body">
+    <figure>
+      <svg viewBox="0 0 800 360" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Iceberg metadata tree: catalog pointer to table metadata, to manifest list, to manifests, to data files">
+        <rect x="14" y="132" width="152" height="92" fill="none" stroke="#93321b" stroke-width="2.5" stroke-linejoin="round"/>
+        <text x="28" y="156" font-family="monospace" font-size="13" fill="#93321b">CATALOG</text>
+        <text x="28" y="178" font-family="monospace" font-size="12" fill="#1d1a15">db.events &#8594;</text>
+        <text x="28" y="196" font-family="monospace" font-size="12" fill="#1d1a15">v3.metadata</text>
+        <text x="28" y="214" font-family="monospace" font-size="11" fill="#1d1a15">(only mutable bit)</text>
+        <text x="14" y="252" font-family="monospace" font-size="11" fill="#93321b">commit = CAS this</text>
+        <text x="14" y="268" font-family="monospace" font-size="11" fill="#93321b">pointer, v3 &#8594; v4</text>
+        <path d="M166 178 L 206 178" stroke="#93321b" stroke-width="2" fill="none"/>
+        <path d="M199 173 L 208 178 L 199 183" stroke="#93321b" stroke-width="2" fill="none" stroke-linecap="round"/>
+        <rect x="210" y="118" width="170" height="120" fill="none" stroke="#1d1a15" stroke-width="2" stroke-linejoin="round"/>
+        <text x="224" y="142" font-family="monospace" font-size="12" fill="#93321b">v3.metadata.json</text>
+        <text x="224" y="162" font-family="monospace" font-size="11" fill="#1d1a15">schema (col IDs)</text>
+        <text x="224" y="180" font-family="monospace" font-size="11" fill="#1d1a15">partition spec</text>
+        <text x="224" y="198" font-family="monospace" font-size="11" fill="#1d1a15">snapshots:</text>
+        <text x="224" y="216" font-family="monospace" font-size="11" fill="#1d1a15">s1 s2 [s3]*</text>
+        <path d="M380 178 L 420 178" stroke="#93321b" stroke-width="2" fill="none"/>
+        <path d="M413 173 L 422 178 L 413 183" stroke="#93321b" stroke-width="2" fill="none" stroke-linecap="round"/>
+        <rect x="424" y="128" width="158" height="100" fill="none" stroke="#1d1a15" stroke-width="2" stroke-linejoin="round"/>
+        <text x="438" y="152" font-family="monospace" font-size="12" fill="#93321b">snap-s3.avro</text>
+        <text x="438" y="170" font-family="monospace" font-size="11" fill="#1d1a15">manifest list</text>
+        <text x="438" y="190" font-family="monospace" font-size="11" fill="#1d1a15">m1: dt&#8804;06-08</text>
+        <text x="438" y="208" font-family="monospace" font-size="11" fill="#1d1a15">m2: dt=06-09</text>
+        <path d="M582 158 C 612 140, 612 110, 632 92" stroke="#93321b" stroke-width="2" fill="none"/>
+        <path d="M624 94 L 634 90 L 631 100" stroke="#93321b" stroke-width="2" fill="none" stroke-linecap="round"/>
+        <path d="M582 200 C 612 218, 612 248, 632 266" stroke="#93321b" stroke-width="2" fill="none"/>
+        <path d="M624 264 L 634 268 L 631 258" stroke="#93321b" stroke-width="2" fill="none" stroke-linecap="round"/>
+        <rect x="636" y="40" width="120" height="86" fill="none" stroke="#1d1a15" stroke-width="2" stroke-linejoin="round"/>
+        <text x="648" y="62" font-family="monospace" font-size="12" fill="#93321b">m1.avro</text>
+        <text x="648" y="80" font-family="monospace" font-size="11" fill="#1d1a15">per file:</text>
+        <text x="648" y="96" font-family="monospace" font-size="11" fill="#1d1a15">min/max,</text>
+        <text x="648" y="112" font-family="monospace" font-size="11" fill="#1d1a15">nulls, rows</text>
+        <rect x="636" y="214" width="120" height="86" fill="none" stroke="#1d1a15" stroke-width="2" stroke-linejoin="round"/>
+        <text x="648" y="236" font-family="monospace" font-size="12" fill="#93321b">m2.avro</text>
+        <text x="648" y="254" font-family="monospace" font-size="11" fill="#1d1a15">per file:</text>
+        <text x="648" y="270" font-family="monospace" font-size="11" fill="#1d1a15">min/max,</text>
+        <text x="648" y="286" font-family="monospace" font-size="11" fill="#1d1a15">nulls, rows</text>
+        <path d="M756 70 L 776 70" stroke="#1d1a15" stroke-width="1.5" stroke-dasharray="4 3" fill="none"/>
+        <path d="M756 250 L 776 250" stroke="#1d1a15" stroke-width="1.5" stroke-dasharray="4 3" fill="none"/>
+        <text x="700" y="150" font-family="monospace" font-size="11" fill="#1d1a15">a.parquet</text>
+        <text x="700" y="166" font-family="monospace" font-size="11" fill="#1d1a15">b.parquet</text>
+        <text x="700" y="182" font-family="monospace" font-size="11" fill="#1d1a15">&#8230; (data)</text>
+        <path d="M696 96 L 696 140" stroke="#93321b" stroke-width="1.5" stroke-dasharray="4 3" fill="none"/>
+        <path d="M696 214 L 696 192" stroke="#93321b" stroke-width="1.5" stroke-dasharray="4 3" fill="none"/>
+        <text x="210" y="332" font-family="monospace" font-size="11" fill="#93321b">everything right of the catalog is immutable; readers never block writers</text>
+      </svg>
+      <figcaption>Fig. 7.1 — Four layers of immutable files: table metadata &#8594; snapshot &#8594; manifest list &#8594; manifests &#8594; Parquet data files.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- 8 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Plan-cost arithmetic</div>
+  <h2>1M files, <code>dt = '2026-06-09' AND user_id = 42</code></h2>
+  <div class="body"><div class="cols">
+    <ul>
+      <li><b>Hive:</b> ~1,000 <code>LIST</code> calls to enumerate files</li>
+      <li>Then open every file in the matching partition</li>
+      <li>Cost proportional to <b>table size</b></li>
+    </ul>
+    <ul>
+      <li><b>Iceberg:</b> 1 metadata JSON (~100 KB) + 1 manifest list</li>
+      <li>Only manifests whose range can contain <code>dt</code></li>
+      <li>Only files whose <code>user_id</code> min/max straddle 42</li>
+      <li>~a dozen files, read in parallel</li>
+      <li>Same zone-map idea as Week 5 — lifted into the format</li>
+    </ul>
+  </div></div>
+</section>
+
+<!-- 9 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Commits</div>
+  <h2>An append, step by step</h2>
+  <div class="body">
+    <ol>
+      <li>Write the new Parquet data files</li>
+      <li>Write a new manifest listing them</li>
+      <li>Write a manifest list: old + new manifests</li>
+      <li>Write <code>v4.metadata.json</code> with a new snapshot</li>
+      <li>Ask the catalog to <b>compare-and-swap</b> v3 &#8594; v4</li>
+    </ol>
+  </div>
+</section>
+
+<!-- 10: big number -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Commits</div>
+  <h2>Where all the atomicity lives</h2>
+  <div class="body">
+    <div class="big">1 CAS</div>
+    <p class="big-label">on a few hundred bytes — a metastore lock, a DynamoDB conditional put, or a REST catalog’s conditional POST. Steps 1–4 are just unreferenced objects in a bucket.</p>
+  </div>
+</section>
+
+<!-- 11 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Concurrency</div>
+  <h2>Optimistic concurrency, made cheap</h2>
+  <div class="body">
+    <ul>
+      <li>Two writers race &#8594; one CAS fails</li>
+      <li>Loser re-reads metadata, validates for real conflicts</li>
+      <li>Appends to disjoint files: re-attach manifests, <b>retry</b></li>
+      <li>Compaction rewrote the same files: <b>abort</b></li>
+      <li>Readers pin a snapshot — never take a lock</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 12 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Field note</div>
+  <h2>S3 has no rename</h2>
+  <div class="body">
+    <ul>
+      <li>Hive’s “atomic” write: write temp directory, then rename</li>
+      <li>HDFS rename: O(1) metadata operation</li>
+      <li>S3: copy-then-delete, one object at a time, non-atomic</li>
+      <li>Millisecond commits on-prem took 10+ minutes in the cloud</li>
+      <li>Design rule: <b>never need more than “write a new object”</b></li>
+    </ul>
+  </div>
+</section>
+
+<!-- 13 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Hidden partitioning</div>
+  <h2>Partitions the query can’t miss</h2>
+  <div class="body">
+    <ul>
+      <li>Hive leaks <code>dt</code> into queries — miss it, scan everything, silently</li>
+      <li>Iceberg: partition spec is a <b>transform on a real column</b></li>
+      <li><code>day(event_ts)</code>, <code>bucket(16, user_id)</code>, <code>truncate(4, zipcode)</code></li>
+      <li>Predicate on <code>event_ts</code> &#8594; derived partition bounds &#8594; pruning</li>
+      <li>Specs evolve: <code>month(ts)</code> for 2024, <code>day(ts)</code> from 2025</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 14 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Schema evolution</div>
+  <h2>Columns are IDs, not positions</h2>
+  <div class="body">
+    <ul>
+      <li>Every column carries a <b>permanent integer ID</b></li>
+      <li><code>rename</code> just changes the name attached to ID 7</li>
+      <li><code>drop</code> + <code>add</code> of the same name &#8594; a fresh ID</li>
+      <li>Old Parquet is read by ID — deleted data can’t resurrect</li>
+      <li>Kills the classic Hive bug: drop a column, everything shifts left</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 15 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Time travel &amp; Delta</div>
+  <h2>Free snapshots, and Delta’s other route</h2>
+  <div class="body">
+    <ul>
+      <li><code>FOR VERSION AS OF 8124</code> plans an old snapshot — free</li>
+      <li><code>expire_snapshots</code>: reference-counting GC over the bucket</li>
+      <li>Delta: <code>_delta_log/</code> of ordered JSON <code>add</code>/<code>remove</code> actions</li>
+      <li>Commit = atomically create the next-numbered log file</li>
+      <li>Redo log vs. functional tree — converging (Apache XTable)</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 16: L2 divider -->
+<section class="slide section-slide">
+  <div class="slide-kicker">Lecture 2 · Thursday</div>
+  <h2>Photon and Engines Over Open Files</h2>
+  <p>Can open files perform like a warehouse? The burden of proof is the engine.</p>
+</section>
+
+<!-- 17 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · The two-tier problem</div>
+  <h2>Two copies of the truth</h2>
+  <div class="body">
+    <ul>
+      <li>A lake of cheap Parquet for ML</li>
+      <li>A proprietary warehouse for BI</li>
+      <li>A fleet of ETL jobs shuttling data between them</li>
+      <li>Every hop adds staleness, cost, and a drifting second copy</li>
+      <li>CIDR 2021 names this two-tier world <b>the problem</b></li>
+    </ul>
+  </div>
+</section>
+
+<!-- 18 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · The lakehouse argument</div>
+  <h2>Three falsifiable bets</h2>
+  <div class="body">
+    <ul>
+      <li><b>Metadata fixes ACID</b> — Tuesday’s transactional layer</li>
+      <li><b>Caching + statistics fix latency</b> — NVMe hides S3’s ~50–100 ms first byte</li>
+      <li><b>The format gap is closable</b> — Parquet ≈ warehouses’ internal layout, standardized</li>
+      <li>Nothing claims novelty; the claim is <b>architectural</b>: open at every lock-in interface</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 19 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Photon’s why</div>
+  <h2>The JVM in the inner loop</h2>
+  <div class="body">
+    <ul>
+      <li>Spark SQL generated Java bytecode per query (whole-stage codegen)</li>
+      <li>JIT bails out past 8 KB of bytecode — on the widest operators</li>
+      <li>GC pauses scale with heap</li>
+      <li>With NVMe caches, <b>CPU — not I/O — became the limit</b></li>
+    </ul>
+  </div>
+</section>
+
+<!-- 20 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Photon’s how</div>
+  <h2>Vectorized and interpreted, in C++</h2>
+  <div class="body">
+    <ul>
+      <li>Columnar batches through precompiled kernels — MonetDB/X100, Week 5</li>
+      <li>Chose interpretation over codegen: observable, debuggable kernels</li>
+      <li>Adaptive per batch: ASCII fast path, no-NULL paths, sparse/dense vectors</li>
+      <li>Slots under Spark’s optimizer via JNI, reads the same Parquet</li>
+      <li>An engine swap invisible above the operator boundary</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 21: big number -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Results</div>
+  <h2>The claim, not hand-waved</h2>
+  <div class="body">
+    <div class="big">3×</div>
+    <p class="big-label">average speedup over the prior Spark engine on customer workloads — up to ~11× on CPU-heavy operators like hash aggregation and string expressions (SIGMOD 2022).</p>
+  </div>
+</section>
+
+<!-- 22 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Results</div>
+  <h2>The industry conceded by imitation</h2>
+  <div class="body">
+    <ul>
+      <li>Headline datapoint: 100 TB TPC-DS world record, 2021, over open formats</li>
+      <li>Apply Week 2’s benchmark skepticism — the direction still stands</li>
+      <li>Trino, DuckDB, ClickHouse, Snowflake, BigQuery: all vectorized over Parquet/Iceberg</li>
+      <li>Polars, DataFusion, Velox compete <b>inside</b> the open-format world</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 23 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · The catalog wars</div>
+  <h2>The new choke point is the map</h2>
+  <div class="body">
+    <ul>
+      <li>Anyone can read the bytes &#8594; control moves to the <b>catalog</b></li>
+      <li>Databricks: Unity Catalog, open-sourced under pressure</li>
+      <li>Snowflake: Polaris — open Iceberg <b>REST catalog protocol</b></li>
+      <li>Databricks paid a reported ~$1–2B for Tabular that same week</li>
+      <li>The REST protocol is the JDBC of this era</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 24 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · The agent angle</div>
+  <h2>Agents skip the SQL front door</h2>
+  <div class="body">
+    <ul>
+      <li>REST catalog &#8594; metadata location + vended credential</li>
+      <li>Parquet read straight into Arrow with DuckDB or Polars</li>
+      <li><b>No server enforces semantics</b> on that path</li>
+      <li>Snapshot, column IDs, transforms — all live in the format</li>
+      <li>The format is the database; the spec is its source code</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 25: big number -->
+<section class="slide">
+  <div class="slide-kicker">L2 · The agent angle</div>
+  <h2>Metadata is load-bearing now</h2>
+  <div class="body">
+    <div class="big">&lt;20%</div>
+    <p class="big-label">baseline text-to-SQL accuracy on Spider 2.0-style enterprise benchmarks — largely because real catalogs are documentation deserts. Descriptions, join paths, and freshness in context move it dramatically.</p>
+  </div>
+</section>
+
+<!-- 26: table -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Recap</div>
+  <h2>Three table definitions</h2>
+  <div class="body">
+    <table>
+      <thead>
+        <tr><th>Property</th><th>Hive directories</th><th>Iceberg (tree)</th><th>Delta (log)</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Table definition</td><td>whatever <code>LIST</code> returns</td><td>snapshot in metadata file</td><td>log replay from checkpoint</td></tr>
+        <tr><td>Commit atomicity</td><td>none (file-at-a-time)</td><td>CAS on catalog pointer</td><td>atomic create of next log file</td></tr>
+        <tr><td>Plan cost, 1M files</td><td>~1,000 LIST calls + opens</td><td>~10s of metadata reads</td><td>checkpoint + log tail</td></tr>
+        <tr><td>Partition predicate</td><td>user must name <code>dt</code></td><td>hidden: transform on column</td><td>generated columns (partial)</td></tr>
+        <tr><td>Schema evolution</td><td>positional; unsafe drops</td><td>column IDs; safe rename/drop</td><td>column mapping (opt-in)</td></tr>
+        <tr><td>Time travel</td><td>—</td><td>snapshot pin, O(1)</td><td>log version pin</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- 27: quote -->
+<section class="slide quote-slide">
+  <div class="q">When every client reads the files directly, the format <b>is</b> the database — and the catalog is the only map the agent has.</div>
+  <cite>— Week 7 lecture notes</cite>
+</section>
+
+<!-- 28: checkpoint -->
+<section class="slide">
+  <div class="slide-kicker">Checkpoint · Discussion</div>
+  <h2>Before you leave</h2>
+  <div class="body">
+    <ul>
+      <li>Which single Iceberg statistic skips files <b>within</b> the matching week — and what data property makes it useless for <code>user_id</code>? (Ex 7.1)</li>
+      <li>In your <code>toyberg</code>, which racing commits may retry and which must abort? (Ex 7.2)</li>
+      <li>How could an agent <b>detect</b> stale catalog metadata rather than trust it? (Ex 7.3)</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 29: readings -->
+<section class="slide">
+  <div class="slide-kicker">Readings · Due Thursday</div>
+  <h2>Read before Thursday</h2>
+  <div class="body">
+    <ol>
+      <li><b>Lakehouse</b> — Armbrust, Ghodsi, Xin, Zaharia, CIDR 2021. Extract the three bets in §3; which carries the most risk?</li>
+      <li><b>Apache Iceberg Table Spec, v2</b> — ASF; pair with Ryan Blue’s Netflix 2018 talk. Find where per-column bounds live.</li>
+      <li><b>Photon</b> — Behm, Palkar, Agarwal, et al., SIGMOD 2022. Focus on §3’s vectorize-and-interpret decision; skim the eval skeptically.</li>
+    </ol>
+  </div>
+</section>
+
+<script src="deck.js"></script>
+</body>
+</html>

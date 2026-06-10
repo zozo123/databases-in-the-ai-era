@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Week 4 Slides: Disaggregation &amp; Elasticity — DATA 2027</title>
+<meta name="theme-color" content="#f6f1e7">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23f6f1e7'/%3E%3Cellipse cx='50' cy='28' rx='30' ry='12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 28v44c0 6.6 13.4 12 30 12s30-5.4 30-12V28' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 50c0 6.6 13.4 12 30 12s30-5.4 30-12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,600;9..144,900&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="deck.css">
+</head>
+<body data-week="WEEK 04">
+
+<!-- 1: title -->
+<section class="slide title-slide">
+  <div class="slide-kicker">DATA 2027 · Week 04 · Part I — Foundations Under New Workloads</div>
+  <h1>Disaggregation &amp; <em>Elasticity</em></h1>
+  <p class="sub">Snowflake said the warehouse is rented compute over object storage; Amazon said the log is the database — this week we take both literally.</p>
+  <p class="course-line">Lecture 1 — Aurora: the Log Is the Database · Lecture 2 — Snowflake and the Elastic Warehouse</p>
+</section>
+
+<!-- 2: L1 divider -->
+<section class="slide section-slide">
+  <div class="slide-kicker">Lecture 1 · Tuesday</div>
+  <h2>Aurora: the Log Is the Database</h2>
+  <p>Verbitski et al., SIGMOD 2017 — ship only the redo log, and let storage do the rest.</p>
+</section>
+
+<!-- 3 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · The insight</div>
+  <h2>Two descriptions of one state</h2>
+  <div class="body">
+    <ul>
+      <li>Every database holds <b>data pages</b> and the <b>redo log</b>.</li>
+      <li>They are informationally redundant — the log rebuilds every page.</li>
+      <li>For forty years we replicated <b>both</b>.</li>
+      <li>Cloud datacenter: fast network, storage that runs code.</li>
+      <li>Aurora: <b>ship only the log</b>; materialize pages in storage.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 4 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Write amplification</div>
+  <h2>What mirrored MySQL writes per transaction</h2>
+  <div class="body">
+    <ul>
+      <li>Redo log record — plus the full <b>16 KB page</b>.</li>
+      <li>Second page copy: the <b>double-write buffer</b>.</li>
+      <li><b>Binlog</b> for replication, plus metadata.</li>
+      <li>Networked block storage replicates each write <b>again</b>.</li>
+      <li>A hot standby repeats the entire set — synchronously.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 5 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Write amplification</div>
+  <h2>Count it: 10 rows, 8 pages</h2>
+  <div class="body"><div class="cols">
+    <ul>
+      <li><b>Mirrored MySQL:</b> 8 × 16 KB pages, doubled.</li>
+      <li>Plus log, binlog, full replay downstream.</li>
+      <li>Over <b>half a megabyte</b> of writes.</li>
+    </ul>
+    <ul>
+      <li><b>Aurora:</b> 10 redo records, ~100 bytes each.</li>
+      <li>Sent to six storage nodes.</li>
+      <li>About <b>6 KB</b> total.</li>
+    </ul>
+  </div></div>
+</section>
+
+<!-- 6: big number -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Write amplification</div>
+  <h2>The intent was always small</h2>
+  <div class="body">
+    <div class="big">~100×</div>
+    <p class="big-label">reduction in write traffic when only redo records cross the network — a few hundred bytes of intent, not megabytes of pages.</p>
+  </div>
+</section>
+
+<!-- 7: big number -->
+<section class="slide">
+  <div class="slide-kicker">L1 · The benchmark</div>
+  <h2>And it shows up in throughput</h2>
+  <div class="body">
+    <div class="big">35×</div>
+    <p class="big-label">more transactions than mirrored MySQL over a 30-minute SysBench write-only run — with 7.7× fewer I/Os per transaction.</p>
+  </div>
+</section>
+
+<!-- 8 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Write path</div>
+  <h2>Only the log crosses the network</h2>
+  <div class="body">
+    <ul>
+      <li>Primary keeps InnoDB’s parser, optimizer, transactions, buffer pool.</li>
+      <li>But it only ever <b>writes redo records</b>, tagged by LSN.</li>
+      <li>Records stream to six replicas per <b>10 GB segment</b>.</li>
+      <li>Commit: <b>volume durable LSN</b> passes commit LSN on quorum.</li>
+      <li>No checkpointing — storage applies the log continuously.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 9 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Quorum math</div>
+  <h2>Why not the usual 2/3?</h2>
+  <div class="body">
+    <ul>
+      <li>Quorum rules: V<sub>r</sub> + V<sub>w</sub> &gt; V, and V<sub>w</sub> &gt; V/2.</li>
+      <li>2/3 satisfies both — most systems used it.</li>
+      <li>But AWS failures are <b>correlated</b>: a whole AZ can vanish.</li>
+      <li>Node failures continue at background rates regardless.</li>
+      <li>Design target: survive <b>AZ+1</b> — an AZ plus one node.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 10 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Quorum math</div>
+  <h2>Six copies, two per AZ</h2>
+  <div class="body">
+    <figure>
+      <svg viewBox="0 0 800 360" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Aurora primary fanning redo records out to six storage nodes across three AZs" font-family="monospace">
+        <rect x="0" y="0" width="800" height="360" fill="#efe8d8"/>
+        <rect x="290" y="24" width="220" height="48" fill="none" stroke="#1d1a15" stroke-width="2"/>
+        <text x="400" y="45" font-size="13" fill="#1d1a15" text-anchor="middle">PRIMARY (InnoDB)</text>
+        <text x="400" y="62" font-size="11" fill="#1d1a15" text-anchor="middle">SQL · txns · buffer pool</text>
+        <path d="M400 72 C 300 120, 160 130, 110 176" fill="none" stroke="#93321b" stroke-width="2"/>
+        <path d="M400 72 C 350 124, 270 134, 230 176" fill="none" stroke="#93321b" stroke-width="2"/>
+        <path d="M400 72 C 385 126, 360 138, 350 176" fill="none" stroke="#93321b" stroke-width="2"/>
+        <path d="M400 72 C 415 126, 440 138, 450 176" fill="none" stroke="#93321b" stroke-width="2"/>
+        <path d="M400 72 C 450 124, 530 134, 570 176" fill="none" stroke="#93321b" stroke-width="2"/>
+        <path d="M400 72 C 500 120, 640 130, 690 176" fill="none" stroke="#93321b" stroke-width="2"/>
+        <text x="400" y="108" font-size="13" fill="#93321b" text-anchor="middle">redo records only (~100 B, no pages)</text>
+        <rect x="70" y="178" width="80" height="44" fill="none" stroke="#1d1a15" stroke-width="2"/>
+        <rect x="190" y="178" width="80" height="44" fill="none" stroke="#1d1a15" stroke-width="2"/>
+        <rect x="310" y="178" width="80" height="44" fill="none" stroke="#1d1a15" stroke-width="2"/>
+        <rect x="410" y="178" width="80" height="44" fill="none" stroke="#1d1a15" stroke-width="2"/>
+        <rect x="530" y="178" width="80" height="44" fill="none" stroke="#1d1a15" stroke-width="2"/>
+        <rect x="650" y="178" width="80" height="44" fill="none" stroke="#1d1a15" stroke-width="2"/>
+        <text x="110" y="204" font-size="12" fill="#1d1a15" text-anchor="middle">SN1</text>
+        <text x="230" y="204" font-size="12" fill="#1d1a15" text-anchor="middle">SN2</text>
+        <text x="350" y="204" font-size="12" fill="#1d1a15" text-anchor="middle">SN3</text>
+        <text x="450" y="204" font-size="12" fill="#1d1a15" text-anchor="middle">SN4</text>
+        <text x="570" y="204" font-size="12" fill="#1d1a15" text-anchor="middle">SN5</text>
+        <text x="690" y="204" font-size="12" fill="#1d1a15" text-anchor="middle">SN6</text>
+        <rect x="58" y="238" width="224" height="30" fill="none" stroke="#1d1a15" stroke-width="1" stroke-dasharray="4 4"/>
+        <rect x="298" y="238" width="204" height="30" fill="none" stroke="#1d1a15" stroke-width="1" stroke-dasharray="4 4"/>
+        <rect x="518" y="238" width="224" height="30" fill="none" stroke="#1d1a15" stroke-width="1" stroke-dasharray="4 4"/>
+        <text x="170" y="258" font-size="11" fill="#1d1a15" text-anchor="middle">AZ-a</text>
+        <text x="400" y="258" font-size="11" fill="#1d1a15" text-anchor="middle">AZ-b</text>
+        <text x="630" y="258" font-size="11" fill="#1d1a15" text-anchor="middle">AZ-c</text>
+        <text x="400" y="302" font-size="14" fill="#93321b" text-anchor="middle" font-weight="bold">ACK at 4/6 write quorum · read at 3/6</text>
+        <text x="400" y="326" font-size="11" fill="#1d1a15" text-anchor="middle">lose an AZ (−2): writes continue · lose AZ+1 (−3): no data lost, rebuild and resume</text>
+      </svg>
+      <figcaption>Fig. 1 — AZ+1: losing a whole AZ leaves 4/6 (writes continue); AZ plus one node leaves 3/6 (reads stand, data survives).</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- 11: big number -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Repair speed</div>
+  <h2>Durability is a race</h2>
+  <div class="body">
+    <div class="big">~10 s</div>
+    <p class="big-label">to re-replicate a lost 10 GB segment over a 10 Gbps link. A second failure only hurts inside that window, in the same protection group. Big segments would stretch it to hours.</p>
+  </div>
+</section>
+
+<!-- 12 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Storage nodes</div>
+  <h2>Storage materializes the pages</h2>
+  <div class="body"><div class="cols">
+    <ul>
+      <li><b>Foreground:</b> receive redo, queue, persist, ACK.</li>
+      <li>Two steps — the whole latency-critical path.</li>
+    </ul>
+    <ul>
+      <li><b>Background:</b> sort by LSN, gossip holes.</li>
+      <li>Coalesce redo onto pages; back up to S3.</li>
+      <li>Garbage-collect versions; scrub checksums.</li>
+    </ul>
+  </div></div>
+</section>
+
+<!-- 13 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Recovery</div>
+  <h2>Crash recovery, inverted</h2>
+  <div class="body">
+    <ul>
+      <li>Traditional: replay log from checkpoint <b>before</b> opening.</li>
+      <li>Downtime proportional to log backlog — minutes.</li>
+      <li>Aurora: storage is <b>always</b> applying the log.</li>
+      <li>Re-establish durable LSN by quorum reads; <b>open immediately</b>.</li>
+      <li>Pages reach consistency lazily, on first touch.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 14: L2 divider -->
+<section class="slide section-slide">
+  <div class="slide-kicker">Lecture 2 · Thursday</div>
+  <h2>Snowflake and the Elastic Warehouse</h2>
+  <p>Dageville et al., SIGMOD 2016 — what if compute owned nothing at all?</p>
+</section>
+
+<!-- 15 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Architecture</div>
+  <h2>Three layers, three domains</h2>
+  <div class="body">
+    <ul>
+      <li><b>Cloud services:</b> catalog, transactions, optimizer, access control.</li>
+      <li><b>Virtual warehouses:</b> stateless EC2 clusters; SSD is just cache.</li>
+      <li><b>Storage:</b> S3 — slow first byte, unbounded bandwidth, eleven nines.</li>
+      <li>Each layer scales independently; nothing ever stresses S3.</li>
+      <li>Kill a warehouse mid-query: lose cache, <b>never data</b>.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 17 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Micro-partitions</div>
+  <h2>Immutable micro-partitions</h2>
+  <div class="body">
+    <ul>
+      <li>Files of <b>50–500 MB</b> uncompressed data each.</li>
+      <li>Internally columnar — a PAX-style hybrid layout.</li>
+      <li>Writes never modify files: write new, swap metadata.</li>
+      <li>Updating one row rewrites that row’s partition.</li>
+      <li>Sounds wasteful — until you see what immutability buys.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 18 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Micro-partitions</div>
+  <h2>What immutability buys</h2>
+  <div class="body">
+    <ul>
+      <li><b>Pruning:</b> per-column min/max zone maps skip partitions.</li>
+      <li>99%+ of I/O eliminated before bytes leave S3.</li>
+      <li>No B-tree indexes — pruning over sorted-ish data <b>is</b> the index.</li>
+      <li><b>Time travel:</b> “as of” = resolve an older file list.</li>
+      <li><b>Zero-copy clone:</b> 50 TB table = one metadata entry.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 19 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Economics</div>
+  <h2>The one-line argument</h2>
+  <div class="body">
+    <ul>
+      <li><b>100 machines × 1 hour = 1 machine × 100 hours.</b></li>
+      <li>Only one of them returns your answer today.</li>
+      <li>Coupled systems can’t exploit it — re-sharding outlasts the query.</li>
+      <li>Stateless compute: resize = boot nodes, warm caches.</li>
+      <li>64 nodes × 9 min ≈ one node × 9.6 hours.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 20 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Economics</div>
+  <h2>NSDI 2020: the bet, measured</h2>
+  <div class="body">
+    <ul>
+      <li>Production telemetry confirms the 2016 design.</li>
+      <li>Real workloads are <b>violently bursty</b>.</li>
+      <li>SSD caches hit high rates holding a sliver of data — <b>skew helps</b>.</li>
+      <li>Idle 95% of the day → 5% of list price, via auto-suspend.</li>
+      <li>Unsolved: <b>intermediate data</b> — shuffle and spill in big joins.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 21 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Neon</div>
+  <h2>Neon: Postgres, taken apart</h2>
+  <div class="body">
+    <ul>
+      <li>Unmodified Postgres, <b>stateless</b> — no data directory that matters.</li>
+      <li>WAL streams to three <b>safekeepers</b>: Paxos-style 2/3 quorum.</li>
+      <li>Commit = quorum of safekeepers has the bytes.</li>
+      <li><b>Pageservers</b> build delta + image layers, cache on NVMe.</li>
+      <li>Everything tiers to S3 as immutable layer files.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 22 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Neon</div>
+  <h2>The thesis of the week, as an API</h2>
+  <div class="body">
+    <pre><code>GetPage@LSN(tenant, timeline, rel, blkno, lsn)
+  → 8 KB page image</code></pre>
+    <ul>
+      <li>A page requested <b>at a point in logical time</b>.</li>
+      <li>Newest image layer ≤ LSN, plus deltas between.</li>
+      <li>Pages addressable by (block, time) → branches are trivial.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 23 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Neon</div>
+  <h2>WAL in, pages out</h2>
+  <div class="body">
+    <figure>
+      <svg viewBox="0 0 800 360" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Neon pipeline: Postgres to safekeepers to pageserver to S3, with GetPage@LSN back edge" font-family="monospace">
+        <rect x="0" y="0" width="800" height="360" fill="#efe8d8"/>
+        <rect x="280" y="20" width="240" height="48" fill="none" stroke="#1d1a15" stroke-width="2"/>
+        <text x="400" y="41" font-size="13" fill="#1d1a15" text-anchor="middle">POSTGRES (stateless)</text>
+        <text x="400" y="58" font-size="11" fill="#1d1a15" text-anchor="middle">scale to zero when idle</text>
+        <path d="M360 68 C 330 90, 310 98, 300 112" fill="none" stroke="#93321b" stroke-width="2"/>
+        <text x="300" y="94" font-size="12" fill="#93321b" text-anchor="middle">WAL</text>
+        <rect x="190" y="114" width="70" height="40" fill="none" stroke="#1d1a15" stroke-width="2"/>
+        <rect x="270" y="114" width="70" height="40" fill="none" stroke="#1d1a15" stroke-width="2"/>
+        <rect x="350" y="114" width="70" height="40" fill="none" stroke="#1d1a15" stroke-width="2"/>
+        <text x="305" y="139" font-size="11" fill="#1d1a15" text-anchor="middle">SAFEKEEPERS</text>
+        <text x="305" y="174" font-size="12" fill="#93321b" text-anchor="middle">paxos quorum 2/3 = commit</text>
+        <path d="M305 184 C 305 200, 330 208, 350 218" fill="none" stroke="#93321b" stroke-width="2"/>
+        <rect x="280" y="220" width="240" height="46" fill="none" stroke="#1d1a15" stroke-width="2"/>
+        <text x="400" y="240" font-size="13" fill="#1d1a15" text-anchor="middle">PAGESERVER</text>
+        <text x="400" y="257" font-size="11" fill="#1d1a15" text-anchor="middle">delta + image layers · NVMe cache</text>
+        <path d="M520 240 C 600 220, 610 110, 524 50" fill="none" stroke="#93321b" stroke-width="2" stroke-dasharray="5 4"/>
+        <path d="M524 50 l 13 1 m -13 -1 l 3 12" fill="none" stroke="#93321b" stroke-width="2"/>
+        <text x="638" y="140" font-size="12" fill="#93321b" text-anchor="middle">GetPage@LSN</text>
+        <text x="638" y="156" font-size="11" fill="#93321b" text-anchor="middle">→ 8 KB page</text>
+        <path d="M400 266 C 400 282, 400 286, 400 294" fill="none" stroke="#93321b" stroke-width="2"/>
+        <ellipse cx="400" cy="306" rx="90" ry="10" fill="none" stroke="#1d1a15" stroke-width="2"/>
+        <path d="M310 306 v22 c0 6 40 10 90 10 s90 -4 90 -10 v-22" fill="none" stroke="#1d1a15" stroke-width="2"/>
+        <text x="400" y="330" font-size="11" fill="#1d1a15" text-anchor="middle">S3 · immutable layers</text>
+        <text x="240" y="306" font-size="11" fill="#93321b" text-anchor="end">CoW branch =</text>
+        <text x="240" y="322" font-size="11" fill="#93321b" text-anchor="end">(parent, LSN)</text>
+      </svg>
+      <figcaption>Fig. 2 — Neon: WAL durable at a 2/3 safekeeper quorum; pageservers reorganize it into immutable layers tiered to S3; stateless Postgres fetches pages on demand.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- 24: big number -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Branching</div>
+  <h2>Copy-on-write, like a Git branch</h2>
+  <div class="body">
+    <div class="big">~1 s</div>
+    <p class="big-label">to branch a 2 TB database — a branch is just (parent timeline, LSN) plus its own WAL after. A hundred branches diverging by megabytes cost a few hundred megabytes total.</p>
+  </div>
+</section>
+
+<!-- 25: table -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Comparison</div>
+  <h2>Three cuts, one idea</h2>
+  <div class="body">
+    <table>
+      <thead>
+        <tr><th>Axis</th><th>Aurora (2017)</th><th>Snowflake (2016)</th><th>Neon (2020s)</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Crosses network on write</td><td>Redo records only</td><td>New micro-partition files</td><td>WAL stream</td></tr>
+        <tr><td>Durability</td><td>4/6 quorum, 3 AZs</td><td>S3 + replicated metadata</td><td>2/3 Paxos, then S3</td></tr>
+        <tr><td>Unit of elasticity</td><td>Read replicas</td><td>Warehouses, per second</td><td>Compute → zero per branch</td></tr>
+        <tr><td>Materialization</td><td>Storage coalesces redo</td><td>Compute writes files</td><td>Delta + image layers</td></tr>
+        <tr><td>Cost of a full copy</td><td>Volume clone (CoW)</td><td>Zero-copy clone</td><td>Branch = (parent, LSN)</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- 26 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Agents</div>
+  <h2>Seismograph demand curves</h2>
+  <div class="body">
+    <ul>
+      <li>Human OLTP: a diurnal sine wave. Provision for the peak.</li>
+      <li>Agents: flat zero, then <b>400 sessions in two seconds</b>.</li>
+      <li>Hot for ninety seconds, then gone. Duty cycle under 1%.</li>
+      <li>Provisioned-for-peak at 1% duty = <b>100× cost penalty</b>.</li>
+      <li>Only scale-to-zero compute prices that curve honestly.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 27 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Agents</div>
+  <h2>Branch-per-experiment is isolation</h2>
+  <div class="body">
+    <ul>
+      <li>Never rehearse <code>ALTER TABLE</code> on the production timeline.</li>
+      <li>Branch → apply → check → promote or delete.</li>
+      <li>Human scale: a weekend restoring dumps to staging.</li>
+      <li>Agent scale: hundreds of experiments a day — one second each.</li>
+      <li>Isolation for a client that ships code faster than review.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 28 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Synthesis</div>
+  <h2>The cache hierarchy is the architecture</h2>
+  <div class="body">
+    <ul>
+      <li>1981: buffer pool = megabytes of RAM before a local disk.</li>
+      <li>Now: shared buffers <b>~100 ns</b> → NVMe <b>~100 µs</b> → S3 (ms).</li>
+      <li>S3: ~$0.023/GB·month, request-priced GETs.</li>
+      <li>Every design choice is a buffer-pool policy at datacenter size.</li>
+      <li>Week 2’s five-minute rule got promoted to chief architect.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 29: quote -->
+<section class="slide quote-slide">
+  <div class="q">The buffer pool didn’t disappear into the cloud — <b>it became the architecture.</b></div>
+  <cite>— Week 4 lecture notes, DATA 2027</cite>
+</section>
+
+<!-- 30: checkpoint -->
+<section class="slide">
+  <div class="slide-kicker">Checkpoint · Discussion</div>
+  <h2>Before you leave</h2>
+  <div class="body">
+    <ul>
+      <li>200 bytes across 5 pages: count network bytes, mirrored MySQL vs Aurora. Which writes are on the synchronous commit path?</li>
+      <li>Show 3/5 and 2/3 quorums each violate AZ+1. How does the vulnerability window change with 100 GB segments?</li>
+      <li>10,000 branches/day on a 2 TB parent: what invariant must safekeepers preserve when a pageserver dies?</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 31: readings -->
+<section class="slide">
+  <div class="slide-kicker">Readings · Due Thursday</div>
+  <h2>Read before Thursday</h2>
+  <div class="body">
+    <ul>
+      <li><b>Amazon Aurora</b> — Verbitski et al., SIGMOD 2017. §2–3: Figure 2’s write accounting; derive 4/6–3/6 from AZ+1 yourself first.</li>
+      <li><b>The Snowflake Elastic Data Warehouse</b> — Dageville et al., SIGMOD 2016. Three layers; §3.3 on micro-partitions and pruning.</li>
+      <li><b>Building an Elastic Query Engine on Disaggregated Storage</b> — Vuppalapati et al., NSDI 2020. Skew, cache hit rates, intermediate data.</li>
+    </ul>
+  </div>
+</section>
+
+<script src="deck.js"></script>
+</body>
+</html>

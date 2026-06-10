@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Week 3 Slides: One Size Fits None — DATA 2027</title>
+<meta name="theme-color" content="#f6f1e7">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23f6f1e7'/%3E%3Cellipse cx='50' cy='28' rx='30' ry='12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 28v44c0 6.6 13.4 12 30 12s30-5.4 30-12V28' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 50c0 6.6 13.4 12 30 12s30-5.4 30-12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,600;9..144,900&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="deck.css">
+</head>
+<body data-week="WEEK 03">
+
+<!-- 1: title -->
+<section class="slide title-slide">
+  <div class="slide-kicker">DATA 2027 · Week 03 · Part I — Foundations Under New Workloads</div>
+  <h1>One Size Fits <em>None</em></h1>
+  <p class="sub">In 2005 the column store beat the general-purpose engine by 50× — this week we dissect why columns beat rows, and why batches beat tuples.</p>
+  <p class="course-line">Lecture 1 — The column-store argument · Lecture 2 — Vectorized execution: from tuple-at-a-time to batches</p>
+</section>
+
+<!-- 2: L1 divider -->
+<section class="slide section-slide">
+  <div class="slide-kicker">Lecture 1 · Tuesday</div>
+  <h2>The Column-Store Argument</h2>
+  <p>Pick the workload, derive the architecture, measure the gap.</p>
+</section>
+
+<!-- 3 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Stonebraker’s method</div>
+  <h2>Read the 2005 polemic for its <em>method</em></h2>
+  <div class="body">
+    <ul>
+      <li>Commercial RDBMSs: System R descendants, tuned for 1985 OLTP.</li>
+      <li>By 2005: streams, scientific arrays, text, warehousing.</li>
+      <li>Move: design for <b>one workload class alone</b>, then measure.</li>
+      <li>For warehousing, that engine was <b>C-Store</b>.</li>
+      <li>Agents are exactly the new workload class this method demands.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 4: big number -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Stonebraker’s method</div>
+  <h2>The gap wasn’t 20%</h2>
+  <div class="body">
+    <div class="big">50×</div>
+    <p class="big-label">C-Store’s scan speedup over the general-purpose incumbent — one to two orders of magnitude. The generalist isn’t a compromise; it’s a category error.</p>
+  </div>
+</section>
+
+<!-- 5 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Layout</div>
+  <h2>Rows are an OLTP decision, not a law of nature</h2>
+  <div class="body">
+    <ul>
+      <li>Row store: tuple’s attributes contiguous — optimal per-tuple work.</li>
+      <li><code>AVG(price) WHERE shipdate &gt; …</code> touches 2 of 16 attributes.</li>
+      <li>200-byte tuples, 12 useful bytes: <b>94% waste</b> per cache line.</li>
+      <li>Column store: each column contiguous; scan reads only named columns.</li>
+      <li>2-column query on 16 columns: <b>8× I/O reduction</b> before compression.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 6: figure -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Layout</div>
+  <h2>Same table, two physical layouts</h2>
+  <div class="body">
+    <figure>
+      <svg viewBox="0 0 800 360" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Row store versus column store layout and what a 2-column scan touches">
+        <text x="40" y="40" font-family="monospace" font-size="15" fill="#1d1a15">ROW STORE (NSM)</text>
+        <g stroke="#1d1a15" stroke-width="1.5" fill="none">
+          <rect x="40" y="60" width="300" height="34"/>
+          <rect x="40" y="100" width="300" height="34"/>
+          <rect x="40" y="140" width="300" height="34"/>
+          <line x1="100" y1="60" x2="100" y2="174"/>
+          <line x1="160" y1="60" x2="160" y2="174"/>
+          <line x1="220" y1="60" x2="220" y2="174"/>
+          <line x1="280" y1="60" x2="280" y2="174"/>
+        </g>
+        <g fill="#93321b" opacity="0.30">
+          <rect x="220" y="60" width="120" height="34"/>
+          <rect x="220" y="100" width="120" height="34"/>
+          <rect x="220" y="140" width="120" height="34"/>
+        </g>
+        <text x="58" y="82" font-family="monospace" font-size="12" fill="#1d1a15">id</text>
+        <text x="110" y="82" font-family="monospace" font-size="12" fill="#1d1a15">name</text>
+        <text x="170" y="82" font-family="monospace" font-size="12" fill="#1d1a15">qty</text>
+        <text x="228" y="82" font-family="monospace" font-size="12" fill="#93321b">price</text>
+        <text x="288" y="82" font-family="monospace" font-size="12" fill="#93321b">date</text>
+        <text x="40" y="205" font-family="monospace" font-size="12" fill="#1d1a15">scan reads EVERY cell;</text>
+        <text x="40" y="225" font-family="monospace" font-size="12" fill="#1d1a15">cache line = 5 columns,</text>
+        <text x="40" y="245" font-family="monospace" font-size="12" fill="#1d1a15">2 useful</text>
+        <line x1="400" y1="30" x2="400" y2="330" stroke="#93321b" stroke-width="1.5" stroke-dasharray="6 6"/>
+        <text x="440" y="40" font-family="monospace" font-size="15" fill="#1d1a15">COLUMN STORE (DSM)</text>
+        <g stroke="#1d1a15" stroke-width="1.5" fill="none">
+          <rect x="440" y="60" width="60" height="180"/>
+          <rect x="510" y="60" width="60" height="180"/>
+          <rect x="580" y="60" width="60" height="180"/>
+          <rect x="650" y="60" width="60" height="180"/>
+          <rect x="720" y="60" width="60" height="180"/>
+          <line x1="440" y1="120" x2="500" y2="120"/>
+          <line x1="440" y1="180" x2="500" y2="180"/>
+          <line x1="510" y1="120" x2="570" y2="120"/>
+          <line x1="510" y1="180" x2="570" y2="180"/>
+          <line x1="580" y1="120" x2="640" y2="120"/>
+          <line x1="580" y1="180" x2="640" y2="180"/>
+          <line x1="650" y1="120" x2="710" y2="120"/>
+          <line x1="650" y1="180" x2="710" y2="180"/>
+          <line x1="720" y1="120" x2="780" y2="120"/>
+          <line x1="720" y1="180" x2="780" y2="180"/>
+        </g>
+        <g fill="#93321b" opacity="0.30">
+          <rect x="650" y="60" width="60" height="180"/>
+          <rect x="720" y="60" width="60" height="180"/>
+        </g>
+        <text x="452" y="262" font-family="monospace" font-size="12" fill="#1d1a15">id</text>
+        <text x="516" y="262" font-family="monospace" font-size="12" fill="#1d1a15">name</text>
+        <text x="592" y="262" font-family="monospace" font-size="12" fill="#1d1a15">qty</text>
+        <text x="654" y="262" font-family="monospace" font-size="12" fill="#93321b">price</text>
+        <text x="726" y="262" font-family="monospace" font-size="12" fill="#93321b">date</text>
+        <text x="440" y="300" font-family="monospace" font-size="12" fill="#1d1a15">scan reads 2 of 5 strips;</text>
+        <text x="440" y="320" font-family="monospace" font-size="12" fill="#1d1a15">cache line = 100% one column, SIMD-ready</text>
+      </svg>
+      <figcaption>Fig. 3.1 — Shaded cells: what SELECT AVG(price) … WHERE date &gt; … must pull through the memory hierarchy.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- 7 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Compression</div>
+  <h2>Compression: the second order of magnitude</h2>
+  <div class="body">
+    <ul>
+      <li>A column is <b>same-typed, often-sorted, low-entropy</b> data.</li>
+      <li>Compresses dramatically better than interleaved rows.</li>
+      <li>Three encodings carry most of the weight: RLE, dictionary, bit-packing.</li>
+      <li>Worked example: a 1-billion-row <code>lineitem</code> table.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 8 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Compression</div>
+  <h2>Run-length encoding (RLE)</h2>
+  <div class="body">
+    <ul>
+      <li><code>shipdate</code>, table sorted on it: ~2,500 distinct days.</li>
+      <li>Each date repeats ~400,000 times consecutively.</li>
+      <li>Store <code>(value, run_length)</code>: 2,500 pairs × 8 B ≈ 20 KB.</li>
+      <li>Raw: 4 GB (4-byte dates × 10⁹).</li>
+      <li>Unsorted column: runs of length 1 → <b>2× expansion</b>.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 9: big number -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Compression</div>
+  <h2>RLE on the sort column</h2>
+  <div class="body">
+    <div class="big">200,000×</div>
+    <p class="big-label">4 GB → 20 KB. Absurd, and real — but only on the sort column. That’s why C-Store makes sort order a first-class physical-design decision.</p>
+  </div>
+</section>
+
+<!-- 10 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Compression</div>
+  <h2>Dictionary &amp; bit-packing</h2>
+  <div class="body"><div class="cols">
+    <ul>
+      <li><b>Dictionary:</b> <code>ship_state</code>, 50 values, ~9-byte strings.</li>
+      <li>⌈log₂ 50⌉ = 6 bits/value: 9 GB → 750 MB, <b>12×</b>.</li>
+      <li>Predicates rewrite into code space: <code>state = 'CA'</code> → <code>code = 4</code>.</li>
+    </ul>
+    <ul>
+      <li><b>Bit-packing:</b> <code>quantity</code> ranges 1–50, needs 6 bits, not 32.</li>
+      <li>4 GB → 750 MB, <b>5.3×</b> — just dropping leading zeros.</li>
+      <li>Encodings stack: dictionary → bit-pack → RLE; Parquet lands at <b>5–10×</b> overall.</li>
+    </ul>
+  </div></div>
+</section>
+
+<!-- 11 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Late materialization</div>
+  <h2>Operate on columns as long as possible</h2>
+  <div class="body">
+    <ul>
+      <li>Gluing tuples at the bottom rebuilds a row store, badly.</li>
+      <li>Carry only <b>position lists</b> between operators.</li>
+      <li>Predicate on an RLE run of 400,000 values: <b>one</b> comparison.</li>
+      <li>AND the bitmaps; fetch <code>price</code> only at surviving positions.</li>
+      <li>Stitch tuples at the top, for the few survivors.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 12 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Projections</div>
+  <h2>C-Store doesn’t store “the table”</h2>
+  <div class="body">
+    <ul>
+      <li>Stores <b>projections</b>: overlapping column subsets, each sorted differently.</li>
+      <li>Queries pick the projection with the friendliest sort order.</li>
+      <li>Redundant storage buying read speed — the RUM triangle again.</li>
+      <li>Writes hit a small row-oriented <b>Writeable Store</b>, merged in batches.</li>
+      <li>Squint: it’s the LSM shape from Week 2.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 13 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Hardware</div>
+  <h2>Why the hardware votes for columns</h2>
+  <div class="body"><div class="cols">
+    <ul>
+      <li><b>Cache lines:</b> memory arrives in 64-byte lines.</li>
+      <li>Column of 4-byte ints: 16 useful values per line.</li>
+      <li>200-byte rows: a fraction of one value per line.</li>
+      <li>Scans are bandwidth-bound (~25 GB/s per core).</li>
+    </ul>
+    <ul>
+      <li><b>SIMD:</b> AVX-512 compares 16 packed 32-bit values per instruction.</li>
+      <li>Requires contiguous, same-typed values — columnar is the precondition.</li>
+      <li>Row layout forces a gather, forfeiting the win.</li>
+      <li>The column store is <b>shaped like the machine</b>.</li>
+    </ul>
+  </div></div>
+</section>
+
+<!-- 14: big number -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Field note, 2009</div>
+  <h2>11 minutes became</h2>
+  <div class="body">
+    <div class="big">4.2 s</div>
+    <p class="big-label">Same 40-line revenue query: row-store warehouse vs. an early Vertica cluster on cheaper hardware. Not the cache — 14 columns never read, RLE-run arithmetic on the date predicate, tuples materialized only for the final 900 rows.</p>
+  </div>
+</section>
+
+<!-- 15: L2 divider -->
+<section class="slide section-slide">
+  <div class="slide-kicker">Lecture 2 · Thursday</div>
+  <h2>Vectorized Execution</h2>
+  <p>From tuple-at-a-time to batches — the inner loop meets the modern CPU.</p>
+</section>
+
+<!-- 16 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Volcano</div>
+  <h2>The beloved villain: Volcano (Graefe, 1990)</h2>
+  <div class="body">
+    <ul>
+      <li>Every operator: <code>open()</code>, <code>next()</code>, <code>close()</code> — composes like Unix pipes.</li>
+      <li>Each <code>next()</code> pulls <b>one tuple</b> from below.</li>
+      <li>Beautiful, modular, memory-frugal: one tuple in flight.</li>
+      <li>Mattered enormously when RAM was megabytes.</li>
+      <li>On modern CPUs: catastrophically slow for analytics.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 17: big number -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Volcano</div>
+  <h2>What X100 measured (CIDR 2005)</h2>
+  <div class="body">
+    <div class="big">&lt;10%</div>
+    <p class="big-label">Share of CPU cycles commercial DBMSs spent on actual query work running TPC-H Q1 — IPC an order of magnitude below hand-written C.</p>
+  </div>
+</section>
+
+<!-- 18 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Volcano</div>
+  <h2>The price of one tuple at a time</h2>
+  <div class="body">
+    <ul>
+      <li>Each <code>next()</code>: a virtual call, ~20–40 cycles with pipeline flush.</li>
+      <li>Three operators → three calls per tuple, plus attribute extraction.</li>
+      <li>Type dispatch decided <b>per value</b> in the interpreter.</li>
+      <li>Hundreds of cycles of ceremony around ~5 cycles of work.</li>
+      <li>At 10⁹ tuples: ~5 B useful cycles, 100+ B on ceremony.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 19 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · X100</div>
+  <h2>X100’s fix: change the unit of exchange</h2>
+  <div class="body">
+    <ul>
+      <li><code>next()</code> returns a <b>vector of ~1000 values</b> per column.</li>
+      <li>Virtual-call overhead amortized: 30 ÷ 1000 = <b>0.03 cycles/value</b>.</li>
+      <li>Work done by <b>primitives</b>: precompiled, type-specialized tight loops.</li>
+      <li>Type dispatch once per vector, not once per value.</li>
+      <li>Result: TPC-H Q1 limited by memory bandwidth, not interpretation.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 20: figure -->
+<section class="slide">
+  <div class="slide-kicker">L2 · X100</div>
+  <h2>Why ~1000, not 1,000,000</h2>
+  <div class="body">
+    <figure>
+      <svg viewBox="0 0 800 360" preserveAspectRatio="xMidYMid meet" role="img" aria-label="U-shaped curve of query time versus vector size">
+        <!-- axes -->
+        <line x1="80" y1="300" x2="760" y2="300" stroke="#1d1a15" stroke-width="2"/>
+        <line x1="80" y1="40" x2="80" y2="300" stroke="#1d1a15" stroke-width="2"/>
+        <text x="330" y="345" font-family="monospace" font-size="14" fill="#1d1a15">vector size (log scale)</text>
+        <text x="30" y="180" font-family="monospace" font-size="14" fill="#1d1a15" transform="rotate(-90 30 180)">query time</text>
+        <!-- x tick labels -->
+        <text x="100" y="322" font-family="monospace" font-size="13" fill="#1d1a15">1</text>
+        <text x="300" y="322" font-family="monospace" font-size="13" fill="#1d1a15">10²</text>
+        <text x="450" y="322" font-family="monospace" font-size="13" fill="#1d1a15">10³</text>
+        <text x="640" y="322" font-family="monospace" font-size="13" fill="#1d1a15">10⁴+</text>
+        <!-- U curve (time: high at 1, low plateau 10^2-10^3, rises past 10^4) -->
+        <path d="M 105 60 C 180 220, 240 250, 310 258 C 380 264, 420 264, 470 262 C 540 258, 620 200, 720 110"
+              fill="none" stroke="#93321b" stroke-width="3.5"/>
+        <!-- annotations -->
+        <text x="120" y="90" font-family="monospace" font-size="13" fill="#93321b">interpretation-</text>
+        <text x="120" y="108" font-family="monospace" font-size="13" fill="#93321b">dominated</text>
+        <text x="560" y="120" font-family="monospace" font-size="13" fill="#93321b">vectors fall</text>
+        <text x="560" y="138" font-family="monospace" font-size="13" fill="#93321b">out of cache</text>
+        <!-- sweet spot -->
+        <line x1="390" y1="240" x2="390" y2="300" stroke="#1d1a15" stroke-width="1.5" stroke-dasharray="5 5"/>
+        <text x="300" y="228" font-family="monospace" font-size="13" fill="#1d1a15">sweet spot ~10²–10³</text>
+        <text x="250" y="60" font-family="monospace" font-size="13" fill="#1d1a15">1000 ints = 4 KB; a dozen in flight</text>
+        <text x="250" y="78" font-family="monospace" font-size="13" fill="#1d1a15">≈ 50 KB — resident in a 1 MB L2</text>
+      </svg>
+      <figcaption>Fig. 3.2 — X100’s sensitivity curve: big enough to amortize interpretation, small enough to stay cache-resident.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- 21: code -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Primitives</div>
+  <h2>An X100-style primitive</h2>
+  <div class="body">
+    <pre><code>/* one virtual call delivered n ≈ 1024 values;
+ * below: branch-free, type-specialized, cache-resident,
+ * auto-vectorized (AVX2: 8 lanes per instruction) */
+size_t sel_lt_int32(const int32_t *col, int32_t bound,
+                    uint32_t *sel_out, size_t n)
+{
+    size_t k = 0;
+    for (size_t i = 0; i &lt; n; i++) {
+        sel_out[k] = (uint32_t)i;     /* write position…        */
+        k += (col[i] &lt; bound);        /* …keep it only on match */
+    }
+    return k;   /* positions, not copies */
+}</code></pre>
+  </div>
+</section>
+
+<!-- 22 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Primitives</div>
+  <h2>Selection vectors: positions, not copies</h2>
+  <div class="body">
+    <ul>
+      <li>Primitive returns qualifying <b>positions</b>, not copied survivors.</li>
+      <li>Downstream primitives take <code>(data, sel, n)</code>.</li>
+      <li>Tuesday’s late materialization, recurring at micro-scale.</li>
+      <li>Branch-free <code>k += (cond)</code> sidesteps the branch predictor.</li>
+      <li>A 50%-selective predicate is the predictor’s worst nightmare.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 23 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · HyPer</div>
+  <h2>Vectorize or compile? The HyPer counterpoint</h2>
+  <div class="body">
+    <ul>
+      <li>HyPer (Neumann, 2011): <b>JIT-compile</b> each query to LLVM machine code.</li>
+      <li>Fuses a whole pipeline into one loop; tuple stays <b>in registers</b>.</li>
+      <li>Kersten et al. 2018: built both in one codebase — <b>neither dominates</b>.</li>
+      <li>Compilation wins computation-heavy, long pipelines; vectorization wins memory-bound scans.</li>
+      <li>Usually within 2× of each other; both <b>~100× over Volcano</b>.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 24: table -->
+<section class="slide">
+  <div class="slide-kicker">L2 · HyPer</div>
+  <h2>Three execution models</h2>
+  <div class="body">
+    <table>
+      <thead>
+        <tr><th>Dimension</th><th>Volcano</th><th>Vectorized (X100 → DuckDB)</th><th>JIT (HyPer → Umbra)</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Overhead / value</td><td>~100s of cycles</td><td>~0.03–0.5 cycles</td><td>≈0 (fused loop)</td></tr>
+        <tr><td>Intermediates</td><td>One tuple in flight</td><td>Cache-resident vectors (~4 KB/col)</td><td>None — registers</td></tr>
+        <tr><td>SIMD</td><td>Impossible</td><td>Natural</td><td>Possible, harder</td></tr>
+        <tr><td>Startup latency</td><td>None</td><td>None — precompiled</td><td>ms–100s of ms / query</td></tr>
+        <tr><td>Profiling</td><td>Easy, per-operator</td><td>Easy, per-primitive</td><td>Hard — opaque loop</td></tr>
+        <tr><td>Engineering cost</td><td>Low</td><td>Medium</td><td>High</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- 25 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · HyPer</div>
+  <h2>The compile-time tax</h2>
+  <div class="body">
+    <ul>
+      <li>For short queries, LLVM passes can cost more than execution.</li>
+      <li>HyPer’s fix: run quick-and-dirty code, swap in optimized mid-flight.</li>
+      <li>Umbra: a custom IR to make codegen itself near-instant.</li>
+      <li>When queries are <b>numerous, short, speculative</b> — fixed startup cost <b>is the bill</b>.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 26 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · The agent angle</div>
+  <h2>Agents: hundreds of queries, not a dozen</h2>
+  <div class="body">
+    <ul>
+      <li>Analyst: ~a dozen considered queries per hour. Agent: <b>hundreds</b>.</li>
+      <li><b>Scan-dominant:</b> profiling and hypothesis tests are wide aggregations.</li>
+      <li><b>Speculative:</b> most queries are dead ends — demand cheap, not fast-but-expensive.</li>
+      <li><b>Impatient in aggregate:</b> per-query overhead multiplies by query count.</li>
+      <li>Fit: vectorized engines, precompiled primitives, near-zero startup (DuckDB embedded).</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 27 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · The agent angle</div>
+  <h2>The sizes became formats — and won</h2>
+  <div class="body"><div class="cols">
+    <ul>
+      <li><b>Parquet</b> = C-Store’s storage chapter, standardized.</li>
+      <li>Dictionary + RLE + bit-packing per column chunk.</li>
+      <li>Min/max zone maps per row group skip predicates.</li>
+    </ul>
+    <ul>
+      <li><b>Arrow</b> = the X100 vector, standardized in memory.</li>
+      <li>Engine, dataframe, tool-call boundary pass vectors <b>by pointer</b>.</li>
+      <li>DuckDB over Arrow on Parquet in S3 = the 2005 research stack, verbatim.</li>
+    </ul>
+  </div></div>
+</section>
+
+<!-- 28: quote -->
+<section class="slide quote-slide">
+  <div class="q">A 50× gap isn’t an optimization opportunity — it’s the <b>sound of the wrong architecture</b> hitting the right workload.</div>
+  <cite>— Week 3 lecture notes</cite>
+</section>
+
+<!-- 29: checkpoint -->
+<section class="slide">
+  <div class="slide-kicker">Checkpoint · Discussion</div>
+  <h2>Before you leave</h2>
+  <div class="body">
+    <ul>
+      <li>Why does RLE on an unsorted column <b>expand</b> instead of compress?</li>
+      <li>What bounds the vector-size sweet spot from each side?</li>
+      <li>For bursts of 200–500 speculative agent queries, what metric do you optimize? (Hint: not single-query latency.)</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 30: readings -->
+<section class="slide">
+  <div class="slide-kicker">Readings</div>
+  <h2>Read before Thursday</h2>
+  <div class="body">
+    <ul>
+      <li><b>“One Size Fits All”: An Idea Whose Time Has Come and Gone</b> — Stonebraker &amp; Çetintemel, ICDE 2005. Read for the method, not the predictions.</li>
+      <li><b>C-Store: A Column-oriented DBMS</b> — Stonebraker et al., VLDB 2005. Focus on §3–4: projections, sort-order-dependent compression, WS/RS split.</li>
+      <li><b>MonetDB/X100: Hyper-Pipelining Query Execution</b> — Boncz, Zukowski &amp; Nes, CIDR 2005. The U-shaped vector-size curve is the whole lecture in one figure.</li>
+    </ul>
+  </div>
+</section>
+
+<script src="deck.js"></script>
+</body>
+</html>

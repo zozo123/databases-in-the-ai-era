@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Week 13 Slides: Self-Driving, Self-Assembling, Self-Designing — DATA 2027</title>
+<meta name="theme-color" content="#f6f1e7">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23f6f1e7'/%3E%3Cellipse cx='50' cy='28' rx='30' ry='12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 28v44c0 6.6 13.4 12 30 12s30-5.4 30-12V28' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 50c0 6.6 13.4 12 30 12s30-5.4 30-12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,600;9..144,900&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="deck.css">
+</head>
+<body data-week="WEEK 13">
+
+<!-- 1: title -->
+<section class="slide title-slide">
+  <div class="slide-kicker">DATA 2027 · Week 13 · Part IV — Frontier &amp; Futures</div>
+  <h1>Self-Driving, Self-Assembling, <em>Self-Designing</em></h1>
+  <p class="sub">Twenty years of databases that promise to tune themselves — and the autonomous DBA that actually shipped is an agent with a master prompt and a connection string.</p>
+  <p class="course-line">Lecture 1 — From Auto-Tuning to Self-Design · Lecture 2 — The Agent as DBA</p>
+</section>
+
+<!-- 2: L1 divider -->
+<section class="slide section-slide">
+  <div class="slide-kicker">Lecture 1 · Tuesday</div>
+  <h2>From Auto-Tuning to Self-Design</h2>
+  <p>OtterTune’s Gaussian processes, the Data Calculator’s design continuum, and why the company died while the capability didn’t.</p>
+</section>
+
+<!-- 3 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · The 2017 claim</div>
+  <h2>Automated is not <em>autonomous</em></h2>
+  <div class="body">
+    <ul>
+      <li>Pavlo, CIDR 2017: advisors recommend, a <b>human</b> applies and absorbs blame.</li>
+      <li>A self-driving DBMS must <b>close the loop</b> itself.</li>
+      <li>Predict the workload, act without a maintenance window, learn.</li>
+      <li>Built into Peloton, later reborn as <b>NoisePage</b>.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 4 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Forecast first</div>
+  <h2>Autonomy is a bet on the future workload</h2>
+  <div class="body">
+    <ul>
+      <li>Architecture ordering is the argument: <b>forecast first, then plan</b>.</li>
+      <li>A 40-minute index build only pays if those queries still arrive.</li>
+      <li>Bet quality is bounded by <b>forecast quality</b>, not ML cleverness.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 5 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Forecasting</div>
+  <h2>QueryBot 5000: template, cluster, predict</h2>
+  <div class="body">
+    <ul>
+      <li>Raw logs: <b>millions</b> of distinct statements per day — too many to forecast.</li>
+      <li><b>Template</b> queries (strip constants), then <b>cluster</b> by arrival-rate correlation.</li>
+      <li>Ensemble: linear regression short-horizon, recurrent net longer.</li>
+      <li>Predict an hour to a week out — schedule builds at the <b>3 a.m. trough</b>.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 6: big number -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Forecasting</div>
+  <h2>A few clusters carry the workload</h2>
+  <div class="body">
+    <div class="big">95%</div>
+    <p class="big-label">of query volume covered by the top 5 template clusters, across the workloads QueryBot 5000 studied (SIGMOD 2018).</p>
+  </div>
+</section>
+
+<!-- 7 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Forecasting</div>
+  <h2>Week 13’s client doesn’t sleep</h2>
+  <div class="body">
+    <ul>
+      <li>Agent-generated SQL <b>templates poorly</b> — every prompt shifts the join order.</li>
+      <li>Bursts track <b>upstream model behavior</b>, not human circadian rhythm.</li>
+      <li>Forecasting research assumed the diurnal human; agentic clients break it.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 8 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Planning</div>
+  <h2>A control problem in an ML costume</h2>
+  <div class="body">
+    <ul>
+      <li>Receding-horizon control: actions with <b>benefit, apply-cost, confidence</b>.</li>
+      <li>Re-plan as observations arrive over the forecast window.</li>
+      <li>Constraint 1: <b>every action needs an undo</b>.</li>
+      <li>Constraint 2: <b>never explore on the critical path</b>.</li>
+      <li>Both return Thursday — with an LLM in the planner’s seat.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 9: figure -->
+<section class="slide">
+  <div class="slide-kicker">L1 · The loop</div>
+  <h2>The loop is the product</h2>
+  <div class="body">
+    <figure>
+      <svg viewBox="0 0 800 360" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Self-driving DBMS control loop">
+        <rect x="60" y="60" width="180" height="74" fill="none" stroke="#1d1a15" stroke-width="2" rx="3"/>
+        <text x="150" y="92" text-anchor="middle" font-family="monospace" font-size="15" fill="#1d1a15">FORECAST</text>
+        <text x="150" y="114" text-anchor="middle" font-family="monospace" font-size="11" fill="#1d1a15">cluster + predict arrivals</text>
+        <rect x="320" y="60" width="180" height="74" fill="none" stroke="#1d1a15" stroke-width="2" rx="3"/>
+        <text x="410" y="92" text-anchor="middle" font-family="monospace" font-size="15" fill="#1d1a15">PLAN</text>
+        <text x="410" y="114" text-anchor="middle" font-family="monospace" font-size="11" fill="#1d1a15">benefit − apply cost</text>
+        <rect x="580" y="60" width="160" height="74" fill="none" stroke="#1d1a15" stroke-width="2" rx="3"/>
+        <text x="660" y="92" text-anchor="middle" font-family="monospace" font-size="15" fill="#1d1a15">ACT</text>
+        <text x="660" y="114" text-anchor="middle" font-family="monospace" font-size="11" fill="#1d1a15">index / knob / partition</text>
+        <rect x="320" y="230" width="180" height="74" fill="none" stroke="#93321b" stroke-width="2.5" rx="3"/>
+        <text x="410" y="262" text-anchor="middle" font-family="monospace" font-size="15" fill="#93321b">OBSERVE</text>
+        <text x="410" y="284" text-anchor="middle" font-family="monospace" font-size="11" fill="#93321b">did p99 actually move?</text>
+        <path d="M240 97 L312 97" stroke="#93321b" stroke-width="2" fill="none"/>
+        <path d="M312 97 l-12 -6 v12 z" fill="#93321b"/>
+        <path d="M500 97 L572 97" stroke="#93321b" stroke-width="2" fill="none"/>
+        <path d="M572 97 l-12 -6 v12 z" fill="#93321b"/>
+        <path d="M660 134 C660 230 520 267 508 267" stroke="#93321b" stroke-width="2" fill="none"/>
+        <path d="M508 267 l13 -6 v12 z" fill="#93321b"/>
+        <path d="M320 267 C160 267 150 200 150 142" stroke="#93321b" stroke-width="2" fill="none"/>
+        <path d="M150 142 l-6 13 h12 z" fill="#93321b"/>
+        <line x1="60" y1="330" x2="740" y2="330" stroke="#1d1a15" stroke-width="2" stroke-dasharray="7 5"/>
+        <text x="400" y="350" text-anchor="middle" font-family="monospace" font-size="12" fill="#1d1a15">guardrails: every action reversible · never explore on the critical path</text>
+        <text x="400" y="34" text-anchor="middle" font-family="monospace" font-size="13" fill="#93321b">every box has been swapped out since 2017 — except the dashed line</text>
+      </svg>
+      <figcaption>Fig. — Pavlo et al., CIDR 2017. OtterTune swapped PLAN for a Gaussian process; the Data Calculator widened ACT; the 2026 LLM-DBA replaces the planner. The guardrail line never changed.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- 10: big number -->
+<section class="slide">
+  <div class="slide-kicker">L1 · OtterTune</div>
+  <h2>The knob problem</h2>
+  <div class="body">
+    <div class="big">~350</div>
+    <p class="big-label">configuration knobs in PostgreSQL (MySQL: 500+). They interact nonlinearly, and the defaults are tuned for a machine from 2008.</p>
+  </div>
+</section>
+
+<!-- 11 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · OtterTune</div>
+  <h2>Tuning as black-box optimization</h2>
+  <div class="body">
+    <ul>
+      <li>VLDB 2017: <b>Gaussian-process regression</b> over configs, pick by expected improvement.</li>
+      <li>Factor analysis + k-means prune redundant metrics; <b>LASSO</b> ranks knobs.</li>
+      <li>Order of <b>10 knobs</b> capture most of the achievable gain.</li>
+      <li>TPC-C: roughly <b>25–60% better</b> than vendor defaults.</li>
+      <li>No model of the database needed — it’s a function; <b>sample it</b>.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 12 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · OtterTune</div>
+  <h2>Postmortem: structural, not scientific</h2>
+  <div class="body"><div class="cols">
+    <ul>
+      <li>Founded 2020, <b>~$14.5M raised</b>; shut down 2024.</li>
+      <li><b>Tuning is episodic</b> — what does month nine’s subscription buy?</li>
+    </ul>
+    <ul>
+      <li><b>The channel belonged to the clouds</b>: knob access needs provider cooperation.</li>
+      <li>By 2024 the capability had <b>dissolved into the substrate</b>.</li>
+    </ul>
+  </div></div>
+</section>
+
+<!-- 13 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · History</div>
+  <h2>The advisor-mode plateau</h2>
+  <div class="body">
+    <ul>
+      <li>AutoAdmin index wizard: SQL Server 7.0, <b>1998</b>. DB2 SMART. Oracle’s advisor, 2004.</li>
+      <li>All plateaued at: system recommends, <b>human approves</b>.</li>
+      <li>The approval gap was never technical —</li>
+      <li>it’s about <b>who gets paged at 3 a.m.</b> when the advice is wrong.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 14: big number -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Data Calculator</div>
+  <h2>Stop tuning structures, derive them</h2>
+  <div class="body">
+    <div class="big">10<sup>32</sup></div>
+    <p class="big-label">valid two-node-type designs from ~50 layout primitives (Idreos et al., SIGMOD 2018). B-trees, LSM-trees, tries, hash tables: just the famous coordinates.</p>
+  </div>
+</section>
+
+<!-- 15 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Data Calculator</div>
+  <h2>Cost synthesis: design as navigation</h2>
+  <div class="body">
+    <ul>
+      <li>Compose per-primitive cost models <b>learned from micro-benchmarks</b> on target hardware.</li>
+      <li>What-if answers in <b>seconds</b>, not person-months of implementation.</li>
+      <li><b>RUM tradeoff</b>: read vs. update vs. memory — optimize two.</li>
+      <li>RAG pipelines are also design-space points: chunking, index family, reranker depth.</li>
+      <li>A “Calculator for serving pipelines” is this week’s open problem.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 16: L2 divider -->
+<section class="slide section-slide">
+  <div class="slide-kicker">Lecture 2 · Thursday</div>
+  <h2>The Agent as DBA</h2>
+  <p>The first broadly deployed autonomous DBA is not inside the engine — it holds a connection string and a master prompt.</p>
+</section>
+
+<!-- 17 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · The twist</div>
+  <h2>The 2017 roadmap didn’t predict this</h2>
+  <div class="body">
+    <ul>
+      <li>A general LLM agent <b>outside</b> the engine: connection string + MCP server.</li>
+      <li>Every serious Postgres platform ships MCP tools: schema, <code>EXPLAIN</code>, stats, migrations.</li>
+      <li><b>Master prompts</b>: multi-thousand-token operational playbooks in prose.</li>
+      <li>OtterTune’s expertise, re-encoded — executed by a model that reads the manual.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 18 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · What changes</div>
+  <h2>1 — The tuner can <em>read</em></h2>
+  <div class="body">
+    <ul>
+      <li>OtterTune’s black box was the only honest contract for narrow ML.</li>
+      <li>The agent knows <code>checkpoint_completion_target</code> spreads checkpoint I/O.</li>
+      <li>It knows Postgres 17 changed vacuum memory accounting.</li>
+      <li>It spots your ORM’s N+1 pattern in the log.</li>
+      <li>It debugs <b>causally</b> where the GP could only regress.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 19 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · What changes</div>
+  <h2>2 — Experiments on <em>branches</em></h2>
+  <div class="body">
+    <ul>
+      <li>Copy-on-write branching: a writable replica in <b>seconds, for cents</b>.</li>
+      <li>The missing substrate for “never explore on the critical path.”</li>
+      <li>2017 learned from cautious production nudges;</li>
+      <li>2026 <b>forks reality</b>, replays a captured workload, measures.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 20: figure -->
+<section class="slide">
+  <div class="slide-kicker">L2 · What changes</div>
+  <h2>Fork reality, then ask permission</h2>
+  <div class="body">
+    <figure>
+      <svg viewBox="0 0 800 360" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Branch-based tuning experiment flow">
+        <rect x="24" y="130" width="128" height="90" fill="none" stroke="#1d1a15" stroke-width="2" rx="3"/>
+        <text x="88" y="168" text-anchor="middle" font-family="monospace" font-size="15" fill="#1d1a15">PROD</text>
+        <text x="88" y="192" text-anchor="middle" font-family="monospace" font-size="11" fill="#1d1a15">live traffic</text>
+        <rect x="184" y="130" width="128" height="90" fill="none" stroke="#1d1a15" stroke-width="2" rx="3"/>
+        <text x="248" y="168" text-anchor="middle" font-family="monospace" font-size="15" fill="#1d1a15">BRANCH</text>
+        <text x="248" y="192" text-anchor="middle" font-family="monospace" font-size="11" fill="#1d1a15">CoW fork, secs</text>
+        <rect x="344" y="130" width="128" height="90" fill="none" stroke="#1d1a15" stroke-width="2" rx="3"/>
+        <text x="408" y="168" text-anchor="middle" font-family="monospace" font-size="15" fill="#1d1a15">REPLAY</text>
+        <text x="408" y="192" text-anchor="middle" font-family="monospace" font-size="11" fill="#1d1a15">captured workload</text>
+        <rect x="504" y="130" width="128" height="90" fill="none" stroke="#93321b" stroke-width="2.5" rx="3"/>
+        <text x="568" y="168" text-anchor="middle" font-family="monospace" font-size="15" fill="#93321b">GATE</text>
+        <text x="568" y="192" text-anchor="middle" font-family="monospace" font-size="11" fill="#93321b">falsifiable thresholds</text>
+        <rect x="664" y="130" width="112" height="90" fill="none" stroke="#1d1a15" stroke-width="2" rx="3"/>
+        <text x="720" y="168" text-anchor="middle" font-family="monospace" font-size="15" fill="#1d1a15">PR</text>
+        <text x="720" y="192" text-anchor="middle" font-family="monospace" font-size="11" fill="#1d1a15">human merges</text>
+        <path d="M152 175 L176 175" stroke="#93321b" stroke-width="2"/>
+        <path d="M176 175 l-11 -6 v12 z" fill="#93321b"/>
+        <path d="M312 175 L336 175" stroke="#93321b" stroke-width="2"/>
+        <path d="M336 175 l-11 -6 v12 z" fill="#93321b"/>
+        <path d="M472 175 L496 175" stroke="#93321b" stroke-width="2"/>
+        <path d="M496 175 l-11 -6 v12 z" fill="#93321b"/>
+        <path d="M632 175 L656 175" stroke="#93321b" stroke-width="2"/>
+        <path d="M656 175 l-11 -6 v12 z" fill="#93321b"/>
+        <text x="400" y="60" text-anchor="middle" font-family="monospace" font-size="13" fill="#93321b">hypothesis → experiment → result → pull request</text>
+        <line x1="40" y1="300" x2="760" y2="300" stroke="#1d1a15" stroke-width="2" stroke-dasharray="7 5"/>
+        <text x="400" y="326" text-anchor="middle" font-family="monospace" font-size="12" fill="#1d1a15">DDL only on branches · production changes only via reviewed migration PRs</text>
+      </svg>
+      <figcaption>Fig. — The 2026 experiment loop: the agent never touches production directly; it forks, replays, gates, and opens a PR a human can argue with.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- 21: pre -->
+<section class="slide">
+  <div class="slide-kicker">L2 · What changes</div>
+  <h2>Tuning run #47, verbatim</h2>
+  <div class="body">
+    <pre><code>-- branch: tune/checkpoint-2026-06-09 (fork of prod@LSN 0/8A3F1C40)
+-- hypothesis: p99 spikes align with checkpoints (~every 140s)
+ALTER SYSTEM SET max_wal_size = '8GB';                 -- was 1GB
+ALTER SYSTEM SET checkpoint_completion_target = 0.9;   -- was 0.5
+-- replay: 30 min, 14,212 statements, agent-traffic mix 71%
+-- result: p99 412ms → 287ms · p50 38ms → 37ms
+--         WAL volume +9% · recovery-time est. +6.2 min
+-- gate:   p99 −20%, WAL ≤ +15%, recovery ≤ +10 min  → PASS
+-- action: open PR with diff + transcript; do NOT touch prod</code></pre>
+  </div>
+</section>
+
+<!-- 22 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · What changes</div>
+  <h2>3 — It <em>explains</em> itself</h2>
+  <div class="body">
+    <ul>
+      <li>A GP emits a configuration vector.</li>
+      <li>The agent emits <b>hypothesis, experiment, result, pull request</b>.</li>
+      <li>The approval gap was always a <b>trust gap</b>.</li>
+      <li>Legible reasoning is the first technology that narrows it.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 23 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · What doesn’t change</div>
+  <h2>Now the cold water</h2>
+  <div class="body">
+    <ul>
+      <li>Hallucinated knob semantics — settings <b>renamed two releases ago</b>.</li>
+      <li><b>Over-indexing</b>: twelve locally-good indexes quietly halve write throughput.</li>
+      <li>The <b>lethal trifecta</b>, highest-privilege form: private data + untrusted content + DDL.</li>
+      <li>Plus every analytics-agent failure mode from weeks 10–12.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 24 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · The harness</div>
+  <h2>Guardrails, evals, rollback</h2>
+  <div class="body">
+    <ul>
+      <li><b>Guardrails</b>: allowlisted tools; DDL only on branches; SLO tripwires that auto-revert.</li>
+      <li><b>Evals</b>: replayed incidents with known-good outcomes — a prompt edit is a <b>deploy</b>.</li>
+      <li><b>Rollback</b>: every change carries a down-migration and its branch evidence.</li>
+      <li>Tuesday’s loop survives intact; only the PLAN box got smarter.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 25 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Field note</div>
+  <h2>The 40-minute lock</h2>
+  <div class="body">
+    <ul>
+      <li>Agent applies <code>ALTER TABLE … ADD COLUMN … DEFAULT</code> — “safe in Postgres 11+,” correctly cited.</li>
+      <li>Production was <b>Postgres 10</b>: full rewrite, 40 min of <code>ACCESS EXCLUSIVE</code> on orders.</li>
+      <li>Fix: a <b>version-pinned eval case</b> + migrations through the human CI gate.</li>
+      <li><b>Right in general, wrong here</b> — LLM operations in one incident.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 26: table -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Honest ledger</div>
+  <h2>Learned components, 2026 scorecard</h2>
+  <div class="body">
+    <table>
+      <thead><tr><th>Component</th><th>Status 2026</th><th>Why</th></tr></thead>
+      <tbody>
+        <tr><td>Automatic indexing</td><td><b>Production, fleet-scale</b></td><td>Azure SQL since 2019; verify + auto-revert</td></tr>
+        <tr><td>Knob tuning</td><td><b>Absorbed into platforms</b></td><td>OtterTune dead 2024; lives as defaults</td></tr>
+        <tr><td>Optimizer steering</td><td><b>Production, narrow</b></td><td>Bao-style hints; classical optimizer as floor</td></tr>
+        <tr><td>Learned cardinality</td><td><b>Advisor-mode / lab</b></td><td>Wins benchmarks; loses on drift, tail risk</td></tr>
+        <tr><td>Learned indexes</td><td><b>Niche</b></td><td>Absorbed into LSM parts; B-tree undefeated</td></tr>
+        <tr><td>LLM agent as DBA</td><td><b>Early production, gated</b></td><td>Branch-only DDL, evals, human-merged PRs</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- 27 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · The pattern</div>
+  <h2>The cost of being wrong</h2>
+  <div class="body">
+    <ul>
+      <li>Learned components ship in proportion to how <b>cheap mistakes are to detect and undo</b>.</li>
+      <li>Auto-indexing shipped: an index is <b>verifiable and reversible</b>.</li>
+      <li>Learned cardinalities stall: a bad estimate hides in a slow plan, <b>no alarm attached</b>.</li>
+      <li>The physics was never ML capability. Nothing about 2026 is new on that axis.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 28: quote -->
+<section class="slide quote-slide">
+  <div class="q">Autonomy never shipped as a product you buy. It shipped as a <b>layer you stop noticing</b>.</div>
+  <cite>— Week 13 lecture notes</cite>
+</section>
+
+<!-- 29: checkpoint -->
+<section class="slide">
+  <div class="slide-kicker">Checkpoint · Discussion</div>
+  <h2>Before you leave</h2>
+  <div class="body">
+    <ul>
+      <li>Two knobs jointly beat what each predicts alone — name the phenomenon. Why does it force GP-style <b>sample-efficient</b> methods?</li>
+      <li>Design an agent’s <b>promotion gate</b>: four falsifiable metrics, including one that punishes over-indexing.</li>
+      <li>What is the <b>RUM conjecture’s analogue</b> for RAG pipelines — which three desiderata can’t all win?</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 30: readings -->
+<section class="slide">
+  <div class="slide-kicker">Readings · Week 13</div>
+  <h2>Read before Thursday</h2>
+  <div class="body">
+    <ul>
+      <li><b>Self-Driving Database Management Systems</b> — Pavlo et al., CIDR 2017. Which rung does an LLM agent occupy?</li>
+      <li><b>The Data Calculator</b> — Idreos et al., SIGMOD 2018. Read for the design-space framing.</li>
+      <li><b>OtterTune postmortem</b> — A. Pavlo, blog, 2024. Why the science worked and the business didn’t.</li>
+    </ul>
+  </div>
+</section>
+
+<script src="deck.js"></script>
+</body>
+</html>

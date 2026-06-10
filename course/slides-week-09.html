@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Week 9 Slides: Text-to-SQL Is Not Solved; It’s Specified — DATA 2027</title>
+<meta name="theme-color" content="#f6f1e7">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23f6f1e7'/%3E%3Cellipse cx='50' cy='28' rx='30' ry='12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 28v44c0 6.6 13.4 12 30 12s30-5.4 30-12V28' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 50c0 6.6 13.4 12 30 12s30-5.4 30-12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,600;9..144,900&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="deck.css">
+</head>
+<body data-week="WEEK 09">
+
+<!-- 1: title -->
+<section class="slide title-slide">
+  <div class="slide-kicker">DATA 2027 · Week 09 · Part III — Semantics, Agents, Governance</div>
+  <h1>Text-to-SQL Is Not <em>Solved</em>; It’s Specified</h1>
+  <p class="sub">Models write fluent SQL against toy schemas and confident nonsense against real warehouses — the gap is a missing contract, not missing intelligence.</p>
+  <p class="course-line">Lecture 1 — Why Enterprise Text-to-SQL Fails · Lecture 2 — The Semantic Layer as Schema-for-Models</p>
+</section>
+
+<!-- 2: L1 divider -->
+<section class="slide section-slide">
+  <div class="slide-kicker">Lecture 1 · Tuesday</div>
+  <h2>Why Enterprise Text-to-SQL Fails</h2>
+  <p>For three years the problem looked solved. Then the benchmark stopped lying.</p>
+</section>
+
+<!-- 3: big number — the cliff -->
+<section class="slide">
+  <div class="slide-kicker">L1 · The Cliff</div>
+  <h2>Same models, real warehouses</h2>
+  <div class="body">
+    <div class="big">86% → 17%</div>
+    <p class="big-label">Spider 1.0 execution accuracy vs. Spider 2.0 at launch (late 2024). Nothing about the models got worse — the benchmark stopped hiding the task.</p>
+  </div>
+</section>
+
+<!-- 4: Spider 1.0 was a toy -->
+<section class="slide">
+  <div class="slide-kicker">L1 · The Cliff</div>
+  <h2>What Spider 1.0 was hiding</h2>
+  <div class="body">
+    <ul>
+      <li>Databases average <b>~27 columns</b> across <b>5 tables</b>.</li>
+      <li>Clean names like <code>student.age</code>.</li>
+      <li>One obvious join path between any two tables.</li>
+      <li>Leaderboard became a fight over decimal points.</li>
+      <li>Spider 2.0: BigQuery datasets, Snowflake deployments, real dbt projects.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 5: four axes -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Four Axes</div>
+  <h2>Enterprise differs on four axes at once</h2>
+  <div class="body">
+    <ul>
+      <li><b>Scale of schema</b> — 1,000–3,000+ columns.</li>
+      <li><b>Dialects</b> — BigQuery, Snowflake, DuckDB, ClickHouse.</li>
+      <li><b>Multi-step workflows</b> — explore, sample, then write.</li>
+      <li><b>Business logic absent from the schema</b> — the killer.</li>
+      <li>First three are engineering. The fourth is a missing specification.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 6: scale -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Axis 1 — Scale</div>
+  <h2>The schema no longer fits</h2>
+  <div class="body">
+    <ul>
+      <li>A schema dump alone can exceed <b>100K tokens</b>.</li>
+      <li>“Put the schema in the prompt” becomes a retrieval problem.</li>
+      <li>The model must <b>find</b> the right three tables first.</li>
+      <li>Collisions: <code>amount</code>, <code>amount_usd</code>, <code>amt_net</code>, <code>total_amount_v2</code>.</li>
+      <li>Lexical retrieval turns actively misleading.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 7: dialects + multi-step -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Axes 2 &amp; 3</div>
+  <h2>Dialects &amp; multi-step workflows</h2>
+  <div class="body"><div class="cols">
+    <ul>
+      <li><b>Dialects.</b> <code>strftime</code> where <code>FORMAT_TIMESTAMP</code> is needed.</li>
+      <li>Cheapest failures — they fail loudly.</li>
+      <li>Warning: training distribution ≠ deployment distribution.</li>
+    </ul>
+    <ul>
+      <li><b>Workflows.</b> Inspect <code>INFORMATION_SCHEMA</code>, sample rows, build intermediates.</li>
+      <li>Final queries: 100+ lines, CTEs, windows, a pivot.</li>
+      <li>An agent task with a feedback loop — not one forward pass.</li>
+    </ul>
+  </div></div>
+</section>
+
+<!-- 8: axis four -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Axis 4 — Meaning</div>
+  <h2>The killer: meaning isn’t in the schema</h2>
+  <div class="body">
+    <ul>
+      <li>“Active customer” = purchase in trailing 90 days…</li>
+      <li>…excluding refunds and test accounts. <b>No DDL says that.</b></li>
+      <li>Meaning lives in dbt models, BI definitions, Slack, two analysts’ heads.</li>
+      <li>A fluent guess is worse than an error — it survives review.</li>
+      <li>No model scale fills in a definition never written down.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 9: BIRD -->
+<section class="slide">
+  <div class="slide-kicker">L1 · BIRD</div>
+  <h2>BIRD: between toy and warehouse</h2>
+  <div class="body">
+    <ul>
+      <li><b>12,751 questions</b> over <b>95 databases</b> totaling <b>33 GB</b>.</li>
+      <li>Deliberately “dirty” values.</li>
+      <li><b>External knowledge</b> field: “revenue means <code>price * quantity</code>”.</li>
+      <li>First benchmark to admit the question underdetermines the SQL.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 10: BIRD audit -->
+<section class="slide">
+  <div class="slide-kicker">L1 · BIRD</div>
+  <h2>Even the answer key is noisy</h2>
+  <div class="body">
+    <ul>
+      <li>Audits: a substantial fraction of gold queries wrong or ambiguous.</li>
+      <li>Hired experts couldn’t reliably produce “the correct SQL” either.</li>
+      <li>Inter-annotator agreement on the right SQL: <b>far below 1.0</b>.</li>
+      <li>An 80%-accurate model is graded against a noisy key.</li>
+      <li>Underspecified tasks have no ceiling to converge to.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 11: big number — Stonebraker -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Stonebraker’s Zero</div>
+  <h2>The bluntest measurement</h2>
+  <div class="body">
+    <div class="big">≈ 0</div>
+    <p class="big-label">Accuracy of state-of-the-art text-to-SQL on MIT’s own warehouse, with realistic questions from its actual users. Not adversarial — merely ordinary.</p>
+  </div>
+</section>
+
+<!-- 12: field note -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Field Note</div>
+  <h2>“The model reproduced our ambiguity”</h2>
+  <div class="body">
+    <ul>
+      <li>Assistant over a <b>2,400-column</b> SAP-derived warehouse.</li>
+      <li>“What was Q3 churn?” — three different numbers.</li>
+      <li>All valid SQL; four <code>churn</code>-adjacent columns, three analyst generations.</li>
+      <li>Post-mortem: the company had no agreed definition of churn.</li>
+      <li>The model faithfully reproduced the org chart’s disagreement.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 13: taxonomy figure -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Failure Taxonomy</div>
+  <h2>Four bins hold nearly everything</h2>
+  <div class="body">
+    <figure>
+      <svg viewBox="0 0 800 360" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Four-bin failure taxonomy for enterprise text-to-SQL">
+        <rect x="0" y="0" width="800" height="360" fill="#efe8d8"/>
+        <!-- 2x2 grid of bins -->
+        <rect x="50" y="46" width="330" height="120" fill="none" stroke="#93321b" stroke-width="3"/>
+        <rect x="420" y="46" width="330" height="120" fill="none" stroke="#93321b" stroke-width="3"/>
+        <rect x="50" y="196" width="330" height="120" fill="none" stroke="#1d1a15" stroke-width="2.5" stroke-dasharray="7 5"/>
+        <rect x="420" y="196" width="330" height="120" fill="none" stroke="#93321b" stroke-width="3"/>
+        <text x="215" y="86" font-family="monospace" font-size="17" fill="#93321b" text-anchor="middle" font-weight="bold">WRONG JOIN</text>
+        <text x="215" y="112" font-family="monospace" font-size="12" fill="#1d1a15" text-anchor="middle">fan-out · deprecated bridge</text>
+        <text x="215" y="132" font-family="monospace" font-size="12" fill="#1d1a15" text-anchor="middle">plausible: off by 1.3x, not 1000x</text>
+        <text x="585" y="86" font-family="monospace" font-size="17" fill="#93321b" text-anchor="middle" font-weight="bold">WRONG METRIC VARIANT</text>
+        <text x="585" y="112" font-family="monospace" font-size="12" fill="#1d1a15" text-anchor="middle">gross vs. net · fiscal vs. calendar</text>
+        <text x="585" y="132" font-family="monospace" font-size="12" fill="#1d1a15" text-anchor="middle">a revenue, not the revenue</text>
+        <text x="215" y="236" font-family="monospace" font-size="17" fill="#1d1a15" text-anchor="middle" font-weight="bold">HALLUCINATED COLUMN</text>
+        <text x="215" y="262" font-family="monospace" font-size="12" fill="#1d1a15" text-anchor="middle">invented under retrieval pressure</text>
+        <text x="215" y="282" font-family="monospace" font-size="12" fill="#1d1a15" text-anchor="middle">at least fails loudly</text>
+        <text x="585" y="236" font-family="monospace" font-size="17" fill="#93321b" text-anchor="middle" font-weight="bold">STALE SCHEMA</text>
+        <text x="585" y="262" font-family="monospace" font-size="12" fill="#1d1a15" text-anchor="middle">correct SQL against a ghost</text>
+        <text x="585" y="282" font-family="monospace" font-size="12" fill="#1d1a15" text-anchor="middle">fastest-growing bin</text>
+        <!-- legend -->
+        <line x1="50" y1="338" x2="86" y2="338" stroke="#93321b" stroke-width="3"/>
+        <text x="96" y="343" font-family="monospace" font-size="12" fill="#93321b">contract failure</text>
+        <line x1="330" y1="338" x2="366" y2="338" stroke="#1d1a15" stroke-width="2.5" stroke-dasharray="7 5"/>
+        <text x="376" y="343" font-family="monospace" font-size="12" fill="#1d1a15">the only &quot;model is dumb&quot; bin</text>
+      </svg>
+      <figcaption>Fig. 1 — Grade failed enterprise queries by hand and nearly everything lands here.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- 14: the pattern -->
+<section class="slide">
+  <div class="slide-kicker">L1 · The Pattern</div>
+  <h2>Three of four are specification failures</h2>
+  <div class="body">
+    <ul>
+      <li>Only <b>hallucinated column</b> is a “model is dumb” failure.</li>
+      <li>And it is the most fixable.</li>
+      <li>The other three are failures of <b>specification and contract</b>.</li>
+      <li>The schema tells you what is <b>storable</b>.</li>
+      <li>Nothing machine-readable tells you what is <b>meant</b>. Thursday we fix that.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 15: L2 divider -->
+<section class="slide section-slide">
+  <div class="slide-kicker">Lecture 2 · Thursday</div>
+  <h2>The Semantic Layer as Schema-for-Models</h2>
+  <p>The meaning contract already exists. BI invented it to keep dashboards consistent.</p>
+</section>
+
+<!-- 16: the reframe -->
+<section class="slide">
+  <div class="slide-kicker">L2 · The Reframe</div>
+  <h2>Schemas contract structure, not meaning</h2>
+  <div class="body">
+    <ul>
+      <li>A relational schema is a contract about <b>structure</b>.</li>
+      <li>Enough for fifty years — humans carried definitions in their heads.</li>
+      <li><b>Agents carry nothing.</b></li>
+      <li>The meaning contract must be written, machine-readable, queryable.</li>
+      <li>That artifact has a name: the <b>semantic layer</b>.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 17: four declarations -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Anatomy</div>
+  <h2>Four kinds of declarations</h2>
+  <div class="body">
+    <ul>
+      <li><b>Metrics</b> — named, versioned computations, filters baked in.</li>
+      <li><b>Dimensions</b> — the legal slices, each bound to one column.</li>
+      <li><b>Grain</b> — declared row meaning: per order, per order line.</li>
+      <li><b>Governed joins</b> — explicit path graph with cardinalities.</li>
+      <li>Grain makes fan-out double-counting detectable <b>before</b> execution.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 18: compile flow figure -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Queryable Contract</div>
+  <h2>The agent selects; the layer compiles</h2>
+  <div class="body">
+    <figure>
+      <svg viewBox="0 0 800 360" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Agent request compiled or rejected by the semantic layer">
+        <rect x="0" y="0" width="800" height="360" fill="#efe8d8"/>
+        <!-- agent -->
+        <rect x="40" y="130" width="170" height="90" fill="none" stroke="#1d1a15" stroke-width="2.5"/>
+        <text x="125" y="170" font-family="monospace" font-size="16" fill="#1d1a15" text-anchor="middle" font-weight="bold">AGENT</text>
+        <text x="125" y="194" font-family="monospace" font-size="11" fill="#1d1a15" text-anchor="middle">no freestyle SQL</text>
+        <!-- request arrow -->
+        <line x1="210" y1="175" x2="310" y2="175" stroke="#93321b" stroke-width="2.5"/>
+        <polygon points="322,175 304,167 304,183" fill="#93321b"/>
+        <text x="266" y="122" font-family="monospace" font-size="11" fill="#93321b" text-anchor="middle">metric=net_revenue</text>
+        <text x="266" y="140" font-family="monospace" font-size="11" fill="#93321b" text-anchor="middle">dims=[region,</text>
+        <text x="266" y="158" font-family="monospace" font-size="11" fill="#93321b" text-anchor="middle">fiscal_month]</text>
+        <!-- semantic layer -->
+        <rect x="326" y="110" width="200" height="130" fill="none" stroke="#93321b" stroke-width="3"/>
+        <text x="426" y="160" font-family="monospace" font-size="15" fill="#93321b" text-anchor="middle" font-weight="bold">SEMANTIC</text>
+        <text x="426" y="182" font-family="monospace" font-size="15" fill="#93321b" text-anchor="middle" font-weight="bold">LAYER</text>
+        <text x="426" y="210" font-family="monospace" font-size="11" fill="#1d1a15" text-anchor="middle">governed · compiled</text>
+        <!-- raw tables beneath -->
+        <rect x="346" y="282" width="160" height="48" fill="none" stroke="#1d1a15" stroke-width="2" stroke-dasharray="6 4"/>
+        <text x="426" y="311" font-family="monospace" font-size="12" fill="#1d1a15" text-anchor="middle">raw tables</text>
+        <line x1="426" y1="240" x2="426" y2="282" stroke="#1d1a15" stroke-width="2"/>
+        <!-- outcome: compiled SQL -->
+        <line x1="526" y1="150" x2="616" y2="106" stroke="#1d1a15" stroke-width="2.5"/>
+        <polygon points="628,100 608,102 615,117" fill="#1d1a15"/>
+        <rect x="634" y="66" width="146" height="66" fill="none" stroke="#1d1a15" stroke-width="2.5"/>
+        <text x="707" y="94" font-family="monospace" font-size="13" fill="#1d1a15" text-anchor="middle" font-weight="bold">COMPILED SQL</text>
+        <text x="707" y="116" font-family="monospace" font-size="11" fill="#1d1a15" text-anchor="middle">defined once</text>
+        <!-- outcome: compile error -->
+        <line x1="526" y1="200" x2="616" y2="246" stroke="#93321b" stroke-width="2.5"/>
+        <polygon points="628,252 609,251 617,236" fill="#93321b"/>
+        <rect x="634" y="222" width="146" height="66" fill="none" stroke="#93321b" stroke-width="3"/>
+        <text x="707" y="250" font-family="monospace" font-size="13" fill="#93321b" text-anchor="middle" font-weight="bold">COMPILE ERROR</text>
+        <text x="707" y="272" font-family="monospace" font-size="11" fill="#93321b" text-anchor="middle">loud, costs a retry</text>
+        <text x="571" y="135" font-family="monospace" font-size="11" fill="#1d1a15">governed</text>
+        <text x="571" y="232" font-family="monospace" font-size="11" fill="#93321b">not in contract</text>
+      </svg>
+      <figcaption>Fig. 2 — Undefined metric, inapplicable dimension, or ungoverned join: rejected before SQL exists.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- 19: YAML -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Anatomy</div>
+  <h2>A metric is small and boring — the point</h2>
+  <div class="body">
+<pre><code># semantic_layer/metrics/net_revenue.yml
+metric: net_revenue
+model: fct_order_lines        # grain: one row per order line
+expr: sum(amount_usd) - sum(refund_amount_usd)
+filters:
+  - field: account_type
+    operator: not_in
+    values: [internal, test]
+dimensions: [fiscal_month, region, plan_tier]
+joins:
+  - { to: dim_customers, type: many_to_one, on: account_id }
+owner: finance-analytics      # a human team, not a model
+</code></pre>
+  </div>
+</section>
+
+<!-- 20: fail loudly -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Queryable Contract</div>
+  <h2>“Fail loudly rather than be plausibly wrong”</h2>
+  <div class="body">
+    <ul>
+      <li>A queryable contract, <b>not documentation</b>.</li>
+      <li>The agent never reads a wiki and freestyles SQL.</li>
+      <li>Illegal requests are rejected at compile time.</li>
+      <li>A compile error costs a retry.</li>
+      <li>A plausible wrong number costs <b>trust</b> — the actual product.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 21: big number — Anthropic -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Evidence</div>
+  <h2>Same model, different contract</h2>
+  <div class="body">
+    <div class="big">21% → 95%</div>
+    <p class="big-label">Anthropic’s self-service analytics: raw schema access vs. curated “skills” encoding metric definitions, join guidance, and pitfalls. Same model, 4.5× the accuracy — the expensive ingredient was analyst time, not GPUs.</p>
+  </div>
+</section>
+
+<!-- 22: big number — Cube -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Evidence</div>
+  <h2>The cheapest accuracy intervention recorded</h2>
+  <div class="body">
+    <div class="big">4 KB</div>
+    <p class="big-label">Cube’s paired benchmark: one ~4 KB document of metric and join definitions moved accuracy +17 to +23 percentage points — while a schema dump alone can be 100K tokens of mostly noise.</p>
+  </div>
+</section>
+
+<!-- 23: dbt argument -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Evidence</div>
+  <h2>Accuracy improves twice</h2>
+  <div class="body">
+    <ul>
+      <li>dbt’s production argument: route agent queries through the layer.</li>
+      <li>More correct answers on answerable questions.</li>
+      <li>Unanswerable ones become <b>loud compile failures</b>…</li>
+      <li>…instead of silent wrong numbers.</li>
+      <li>Fewer confident wrong answers is also accuracy.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 24: trust hierarchy figure -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Trust Hierarchy</div>
+  <h2>Not all context is equally trustworthy</h2>
+  <div class="body">
+    <figure>
+      <svg viewBox="0 0 800 360" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Trust hierarchy of context sources for query agents">
+        <rect x="0" y="0" width="800" height="360" fill="#efe8d8"/>
+        <polygon points="305,42 497,44 466,106 336,104" fill="none" stroke="#93321b" stroke-width="3"/>
+        <polygon points="252,118 551,120 522,182 281,180" fill="none" stroke="#1d1a15" stroke-width="2.5"/>
+        <polygon points="198,194 605,196 577,258 226,256" fill="none" stroke="#1d1a15" stroke-width="2.5"/>
+        <polygon points="143,270 661,272 648,332 155,330" fill="none" stroke="#1d1a15" stroke-width="2.5" stroke-dasharray="7 5"/>
+        <text x="401" y="80" font-family="monospace" font-size="16" fill="#93321b" text-anchor="middle" font-weight="bold">SEMANTIC LAYER</text>
+        <text x="401" y="98" font-family="monospace" font-size="11" fill="#93321b" text-anchor="middle">governed · compiled · fails loudly</text>
+        <text x="401" y="156" font-family="monospace" font-size="15" fill="#1d1a15" text-anchor="middle">LINEAGE</text>
+        <text x="401" y="174" font-family="monospace" font-size="11" fill="#1d1a15" text-anchor="middle">derived · accurate · meaning-free</text>
+        <text x="401" y="232" font-family="monospace" font-size="15" fill="#1d1a15" text-anchor="middle">QUERY CORPUS</text>
+        <text x="401" y="250" font-family="monospace" font-size="11" fill="#1d1a15" text-anchor="middle">abundant · encodes old mistakes</text>
+        <text x="401" y="306" font-family="monospace" font-size="15" fill="#1d1a15" text-anchor="middle">BUSINESS CONTEXT</text>
+        <text x="401" y="324" font-family="monospace" font-size="11" fill="#1d1a15" text-anchor="middle">rich · unversioned · stale by default</text>
+        <line x1="60" y1="320" x2="60" y2="60" stroke="#93321b" stroke-width="2.5"/>
+        <polygon points="60,48 52,68 68,68" fill="#93321b"/>
+        <text x="42" y="200" font-family="monospace" font-size="12" fill="#93321b" transform="rotate(-90 42 200)" text-anchor="middle">TRUST</text>
+        <line x1="690" y1="74" x2="735" y2="74" stroke="#93321b" stroke-width="2"/>
+        <text x="742" y="68" font-family="monospace" font-size="11" fill="#93321b">route</text>
+        <text x="742" y="82" font-family="monospace" font-size="11" fill="#93321b">here</text>
+        <text x="742" y="96" font-family="monospace" font-size="11" fill="#93321b">first</text>
+      </svg>
+      <figcaption>Fig. 3 — Resolve at the highest layer that can answer; fall through deliberately. Never blend all four with equal weight.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- 25: provenance -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Trust Hierarchy</div>
+  <h2>Report which layer answered</h2>
+  <div class="body">
+    <ul>
+      <li>Attempt resolution top-down; fall through deliberately.</li>
+      <li>“Resolved via semantic layer” ≠ “inferred from a 2024 corpus query.”</li>
+      <li>The query corpus is the warehouse’s <b>folklore</b>, not its law.</li>
+      <li>Free-text context: richest in meaning, weakest in guarantees.</li>
+      <li>Surfacing provenance is what lets humans calibrate trust.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 26: bootstrapping -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Bootstrapping</div>
+  <h2>Why LLM-bootstrapping the layer failed</h2>
+  <div class="body">
+    <ul>
+      <li>The 2025 shortcut: have the model generate the layer.</li>
+      <li>Its inputs are exactly the <b>untrusted layers</b> of the hierarchy.</li>
+      <li>It recovers all four churn definitions, enshrines the most common.</li>
+      <li>You haven’t removed the ambiguity — you’ve <b>laundered</b> it.</li>
+      <li>Deciding is not a prediction task.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 27: division of labor -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Division of Labor</div>
+  <h2>Humans own definitions; models draft</h2>
+  <div class="body">
+    <ul>
+      <li>Models: mine corpora, diff metric variants, flag undeclared grain.</li>
+      <li>That’s drafting. The <b>commit</b> turns a draft into a contract.</li>
+      <li>It needs an owner who can be wrong in a way that matters.</li>
+      <li><code>owner: finance-analytics</code> — the entire governance model in nine characters.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 28: closing table -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Closing the Taxonomy</div>
+  <h2>Every bin meets a contract mechanism</h2>
+  <div class="body">
+    <table>
+      <thead>
+        <tr><th>Failure mode</th><th>Mitigation</th><th>Failure becomes…</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><b>Wrong join</b></td><td>Governed join graph + declared grain</td><td>Compile-time error (loud)</td></tr>
+        <tr><td><b>Wrong metric variant</b></td><td>Named, owned metric definitions</td><td>A clarifying question (“net or gross?”)</td></tr>
+        <tr><td><b>Hallucinated column</b></td><td>≈4 KB curated retrieval surface</td><td>Rejected before SQL exists</td></tr>
+        <tr><td><b>Stale schema</b></td><td>Versioned layer, CI-tested against warehouse</td><td>A failed build, pre-production</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- 29: quote -->
+<section class="slide quote-slide">
+  <div class="q">A bigger model makes the guess more fluent. <b>Only a contract</b> makes it unnecessary.</div>
+  <cite>— Week 9 lecture notes, DATA 2027</cite>
+</section>
+
+<!-- 30: checkpoint -->
+<section class="slide">
+  <div class="slide-kicker">Week 09 · Checkpoint</div>
+  <h2>Discuss before Friday’s lab</h2>
+  <div class="body">
+    <ul>
+      <li>“How many active customers last month?” — write four defensible SQL readings. Which failure bin does each silent choice land in?</li>
+      <li>Which taxonomy bins can a 4 KB semantic layer close on the 400-column warehouse — and which survive?</li>
+      <li>A bootstrapped layer can be internally consistent yet uniformly wrong. How would you measure that, separately from execution accuracy?</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 31: readings -->
+<section class="slide">
+  <div class="slide-kicker">Week 09 · Readings</div>
+  <h2>Read before Thursday</h2>
+  <div class="body">
+    <ul>
+      <li><b>Spider 2.0</b> — Lei et al., ICLR 2025. The 86→17 cliff, quantified; focus on the error analysis.</li>
+      <li><b>BIRD</b> — Li et al., NeurIPS 2023. The “external knowledge” design decision; be skeptical of the gold annotations.</li>
+      <li><b>How Anthropic Built Self-Service Analytics with Claude</b> — engineering blog, June 2026. The 21→95 result; a semantic layer in everything but name.</li>
+    </ul>
+  </div>
+</section>
+
+<script src="deck.js"></script>
+</body>
+</html>

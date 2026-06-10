@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Week 8 Slides: Transactions &amp; Branching for Agent Swarms — DATA 2027</title>
+<meta name="theme-color" content="#f6f1e7">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23f6f1e7'/%3E%3Cellipse cx='50' cy='28' rx='30' ry='12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 28v44c0 6.6 13.4 12 30 12s30-5.4 30-12V28' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 50c0 6.6 13.4 12 30 12s30-5.4 30-12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,600;9..144,900&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="deck.css">
+</head>
+<body data-week="WEEK 08">
+
+<!-- 1: title -->
+<section class="slide title-slide">
+  <div class="slide-kicker">DATA 2027 · Week 08 · Part II — New Access Methods &amp; Engines</div>
+  <h1>Transactions &amp; Branching for Agent <em>Swarms</em></h1>
+  <p class="sub">When ten thousand agents want to try something before they mean it, the transaction abstraction stretches in two directions at once.</p>
+  <p class="course-line">Lecture 1 — Distributed Transactions: Calvin vs Spanner · Lecture 2 — Copy-on-Write Branching as Product</p>
+</section>
+
+<!-- 2: L1 divider -->
+<section class="slide section-slide">
+  <div class="slide-kicker">Lecture 1 · Tuesday</div>
+  <h2>Distributed Transactions: Calvin vs Spanner</h2>
+  <p>Two poles, both published in 2012, still defining the trade space.</p>
+</section>
+
+<!-- 3 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Why agents stress transactions</div>
+  <h2>Agents are greedy transactional clients</h2>
+  <div class="body">
+    <ul>
+      <li>A human clicks “checkout” once.</li>
+      <li>An agent fleet <b>retries, forks, races itself</b>.</li>
+      <li>Fifty workers write from the same stale plan.</li>
+      <li>“Read committed and hope” → anomaly within the hour.</li>
+      <li>Everything shipping today sits between Calvin and Spanner.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 4 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Sixty seconds of serializability</div>
+  <h2>Two promises, one crucial gap</h2>
+  <div class="body"><div class="cols">
+    <ul>
+      <li><b>Serializable:</b> effects equal <em>some</em> serial order.</li>
+      <li>Existential quantifier — the system picks any order.</li>
+    </ul>
+    <ul>
+      <li><b>Strict serializable</b> (external consistency): adds real time.</li>
+      <li>T₁ commits before T₂ <em>begins</em> → T₁ ordered first.</li>
+    </ul>
+  </div></div>
+</section>
+
+<!-- 5 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Sixty seconds of serializability</div>
+  <h2>Why the gap bites agents</h2>
+  <div class="body">
+    <ul>
+      <li>Agent commits, tells its sibling over HTTP.</li>
+      <li>Sibling’s read may legally <b>not see the write</b>.</li>
+      <li>Equivalent serial order simply put the sibling first.</li>
+      <li>Out-of-band agent communication is the norm.</li>
+      <li>External consistency stopped being academic around 2024.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 6 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Calvin</div>
+  <h2>Calvin: order first, execute later</h2>
+  <div class="body">
+    <ul>
+      <li>Sequencer batches inputs into <b>10 ms epochs</b>, replicated via Paxos.</li>
+      <li>Every partition receives the same global log.</li>
+      <li>Locks granted <b>in log order</b> — deadlock impossible.</li>
+      <li>Crash? Replay the log; determinism converges.</li>
+      <li><b>No two-phase commit</b> — no commit protocol at all.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 7: big number -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Calvin</div>
+  <h2>Determinism scales</h2>
+  <div class="body">
+    <div class="big">500,000</div>
+    <p class="big-label">txns/sec on TPC-C-like workloads, 100 commodity machines — in 2012, while Spanner-style designs paid cross-datacenter round trips per commit.</p>
+  </div>
+</section>
+
+<!-- 8 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Calvin</div>
+  <h2>Calvin’s price is structural</h2>
+  <div class="body">
+    <ul>
+      <li>Read/write sets must be known <b>before sequencing</b>.</li>
+      <li>No interactive <code>BEGIN…COMMIT</code> — submit a whole stored procedure.</li>
+      <li>Dependent txns: recon query first, then re-submit (OLLP).</li>
+      <li>Two trips each; hot keys make recon perpetually stale.</li>
+      <li>Irony: an agent’s <b>final</b> intent is usually declarable.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 9 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Spanner</div>
+  <h2>Spanner: trust the clocks</h2>
+  <div class="body">
+    <ul>
+      <li>Keeps interactive txns: 2PL + 2PC over Paxos groups.</li>
+      <li><b>TrueTime:</b> <code>TT.now()</code> returns [earliest, latest].</li>
+      <li>GPS + atomic clocks keep ε at 1–7 ms, avg ~4 ms.</li>
+      <li><b>Commit wait:</b> hold locks until <code>TT.after(s)</code> is true.</li>
+      <li>Then timestamp order <b>is</b> real-time order, globally.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 10: big number -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Spanner</div>
+  <h2>The cost of external consistency</h2>
+  <div class="body">
+    <div class="big">≈ 2ε</div>
+    <p class="big-label">expected commit-wait stall — about 5–10 ms per commit, paid so non-overlapping transactions need no communication at all.</p>
+  </div>
+</section>
+
+<!-- 11 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · Spanner</div>
+  <h2>What Spanner pays — and buys</h2>
+  <div class="body"><div class="cols">
+    <ul>
+      <li><b>Pays:</b> 2PC prepare + commit across Paxos groups.</li>
+      <li>Cross-region read-write txns: <b>10–100 ms</b>.</li>
+    </ul>
+    <ul>
+      <li><b>Buys:</b> lock-free snapshot reads at any past timestamp.</li>
+      <li>For read-heavy agent fleets, that beats write latency.</li>
+    </ul>
+  </div></div>
+</section>
+
+<!-- 12: table -->
+<section class="slide">
+  <div class="slide-kicker">L1 · The poles, side by side</div>
+  <h2>Calvin vs Spanner</h2>
+  <div class="body">
+    <table>
+      <thead><tr><th>Dimension</th><th>Calvin (SIGMOD ’12)</th><th>Spanner (OSDI ’12)</th></tr></thead>
+      <tbody>
+        <tr><td>Ordering</td><td>Pre-agreed global log</td><td>TrueTime + 2PL</td></tr>
+        <tr><td>Distributed commit</td><td>None — determinism</td><td>2PC over Paxos</td></tr>
+        <tr><td>Interactive txns</td><td>No; recon + re-submit</td><td>Yes, full <code>BEGIN…COMMIT</code></td></tr>
+        <tr><td>Consistency</td><td>Serializable</td><td>Externally consistent</td></tr>
+        <tr><td>Latency tax</td><td>~10 ms epochs + recon</td><td>2ε wait + 2PC rounds</td></tr>
+        <tr><td>Best agent fit</td><td>Declared high-throughput writes</td><td>Read-mostly global snapshots</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- 13 -->
+<section class="slide">
+  <div class="slide-kicker">L1 · MVCC, the bridge to Thursday</div>
+  <h2>Your engine already keeps many realities</h2>
+  <div class="body">
+    <ul>
+      <li>Postgres, InnoDB, Oracle, RocksDB: all <b>multi-version</b>.</li>
+      <li>Updates create versions; vacuum reaps the invisible ones.</li>
+      <li>Snapshot isolation falls out nearly free (minus write skew).</li>
+      <li>Engines keep coexisting realities — then GC after seconds.</li>
+      <li><b>Branching:</b> keep one alive, name it, let it diverge.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 14: L2 divider -->
+<section class="slide section-slide">
+  <div class="slide-kicker">Lecture 2 · Thursday</div>
+  <h2>Copy-on-Write Branching as Product</h2>
+  <p>The mechanism from one B-tree page up to a cloud product.</p>
+</section>
+
+<!-- 15 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · The agentic workload</div>
+  <h2>Speculation is the defining workload</h2>
+  <div class="body">
+    <ul>
+      <li>An agent doesn’t know its migration is right.</li>
+      <li>Honest move: run it somewhere <b>consequence-free</b>.</li>
+      <li>Pre-2022: shared nightly staging, trusted by no one.</li>
+      <li>CoW: writable production-size copy in tens of milliseconds.</li>
+      <li>Cost: only the pages you touch.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 16 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · CoW from one page</div>
+  <h2>LMDB: every commit is a tiny fork</h2>
+  <div class="body">
+    <ul>
+      <li>A writer <b>never modifies a page in place</b>.</li>
+      <li>New leaf → new ancestors → flip one meta page.</li>
+      <li>Readers traverse an immutable tree: no locks, no torn reads.</li>
+      <li>Old and new roots coexist, sharing unmodified pages.</li>
+      <li>Same chord: ZFS, APFS, Aurora, RocksDB checkpoints.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 17 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · CoW at cloud scale</div>
+  <h2>Neon: time travel as a query parameter</h2>
+  <div class="body">
+    <ul>
+      <li>Compute = unmodified Postgres; storage ingests the WAL.</li>
+      <li>Page versions indexed by <b>(page id, LSN)</b>.</li>
+      <li><code>GetPage@LSN</code> materializes any page at any retained point.</li>
+      <li>Once “page P at LSN L” works, a branch is bookkeeping.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 18: figure -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Branch = a new timeline</div>
+  <h2>Forking the WAL at an LSN</h2>
+  <div class="body">
+    <figure>
+      <svg viewBox="0 0 800 360" preserveAspectRatio="xMidYMid meet" role="img" aria-label="WAL timeline with copy-on-write branches forking at LSNs">
+        <rect x="0" y="0" width="800" height="360" fill="#efe8d8"/>
+        <line x1="60" y1="180" x2="740" y2="180" stroke="#1d1a15" stroke-width="3"/>
+        <polygon points="740,180 726,173 726,187" fill="#1d1a15"/>
+        <text x="62" y="166" font-family="monospace" font-size="14" fill="#1d1a15">main (T1)  — WAL →</text>
+        <line x1="220" y1="172" x2="220" y2="188" stroke="#1d1a15" stroke-width="2"/>
+        <text x="196" y="208" font-family="monospace" font-size="13" fill="#1d1a15">LSN 0/52A0</text>
+        <line x1="470" y1="172" x2="470" y2="188" stroke="#1d1a15" stroke-width="2"/>
+        <text x="446" y="208" font-family="monospace" font-size="13" fill="#1d1a15">LSN 0/9F10</text>
+        <path d="M220 180 C 260 120, 300 100, 360 96 L 600 96" fill="none" stroke="#93321b" stroke-width="3"/>
+        <polygon points="600,96 586,89 586,103" fill="#93321b"/>
+        <text x="368" y="84" font-family="monospace" font-size="14" fill="#93321b">agent-7f/try-migration (T2)</text>
+        <text x="368" y="118" font-family="monospace" font-size="12" fill="#93321b">own WAL: dirty pages only</text>
+        <path d="M470 180 C 505 250, 540 268, 590 272" fill="none" stroke="#93321b" stroke-width="3" stroke-dasharray="9 6"/>
+        <text x="600" y="278" font-family="monospace" font-size="14" fill="#93321b">agent-7f/plan-B (T3)</text>
+        <text x="600" y="298" font-family="monospace" font-size="12" fill="#93321b">abandoned → GC reclaims</text>
+        <text x="62" y="252" font-family="monospace" font-size="13" fill="#1d1a15">pages unwritten since fork:</text>
+        <text x="62" y="272" font-family="monospace" font-size="13" fill="#1d1a15">resolved from parent @ fork LSN</text>
+        <line x1="330" y1="248" x2="330" y2="190" stroke="#1d1a15" stroke-width="1.5" stroke-dasharray="4 5"/>
+        <circle cx="220" cy="180" r="6" fill="#93321b"/>
+        <circle cx="470" cy="180" r="6" fill="#93321b"/>
+        <text x="62" y="330" font-family="monospace" font-size="13" fill="#1d1a15">branch create = 1 metadata record: (child, parent, fork LSN). O(metadata), ~10s of ms.</text>
+      </svg>
+      <figcaption>Fig. 8.1 — Branches as timelines forking from the parent’s WAL. Solid child: live delta. Dashed child: abandoned, GC’d; parent history stays pinned to the oldest live fork point.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- 19: big number -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Branch = a new timeline</div>
+  <h2>O(metadata), not O(data)</h2>
+  <div class="body">
+    <div class="big">~50 ms</div>
+    <p class="big-label">to create a branch — one metadata record (child, parent, fork LSN), no pages copied, whether the parent holds 1 GB or 10 TB. The parent can’t even tell it has children.</p>
+  </div>
+</section>
+
+<!-- 20 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · The arithmetic</div>
+  <h2>Ten thousand branches an hour</h2>
+  <div class="body">
+    <ul>
+      <li>64 GB parent, 8 KB pages → 8.4 M pages.</li>
+      <li>Typical speculative run touches ~200 pages ≈ <b>1.6 MB</b>.</li>
+      <li>5-minute average life → ~833 live branches.</li>
+      <li>Steady-state deltas ≈ <b>1.3 GB</b> against the 64 GB base.</li>
+      <li>Storage grows only with <b>divergence</b>. Trivial — so far.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 21 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · The arithmetic</div>
+  <h2>What is <em>not</em> trivial</h2>
+  <div class="body">
+    <ul>
+      <li><b>GC pressure:</b> crashed agents never call <code>delete_branch</code>.</li>
+      <li>Without TTLs + a reaper: corpses at 16 GB/hour.</li>
+      <li>They overtake the 64 GB base in four hours.</li>
+      <li><b>Parent pinning:</b> oldest live fork point sets retention cost.</li>
+      <li><b>Fan-out reads:</b> 833 cold branches hammer shared hot pages.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 22: table -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Worked example</div>
+  <h2>50 branches, 1% divergence each</h2>
+  <div class="body">
+    <table>
+      <thead><tr><th>Strategy</th><th>Formula</th><th>Total storage</th><th>Create time</th></tr></thead>
+      <tbody>
+        <tr><td>50 full copies (pg_dump/restore)</td><td>50 × 64 GB</td><td>3,200 GB</td><td>~40 min each</td></tr>
+        <tr><td>50 CoW branches @ 1% divergence</td><td>64 + 50 × 0.64 GB</td><td><b>96 GB</b></td><td>~50 ms each</td></tr>
+        <tr><td>Break-even divergence</td><td>shared wins until ≈ 98% dirty</td><td>—</td><td>—</td></tr>
+      </tbody>
+    </table>
+    <p>Dirty pages are private — divergent versions can’t be shared, so deltas add linearly.</p>
+  </div>
+</section>
+
+<!-- 23: big number -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Worked example</div>
+  <h2>The headline ratio</h2>
+  <div class="body">
+    <div class="big">33×</div>
+    <p class="big-label">storage reduction vs full copies. Caveat: at 1% divergence per day, a branch parked three months pins a quarter-year of parent history — branches are a speculation primitive, not an archival one.</p>
+  </div>
+</section>
+
+<!-- 24 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · The agent transaction shape</div>
+  <h2>Long think-time, optimistic wins</h2>
+  <div class="body">
+    <ul>
+      <li>Shape: read 50 ms → <b>think 3–30 s</b> → write 20 ms.</li>
+      <li>Under 2PL: 30 s of held locks = self-inflicted DoS.</li>
+      <li>Agrawal–Carey–Livny 1987: OCC wins when conflicts rare, footprints long.</li>
+      <li>So: read a snapshot, think lock-free, <b>validate-and-write</b>.</li>
+      <li>Retries are cheap — re-prompting is one more API call.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 25 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · Field note, 2025</div>
+  <h2>Prompts are not idempotency keys</h2>
+  <div class="body">
+    <ul>
+      <li>Refund agents shared a Postgres <code>UPDATE</code> credential.</li>
+      <li>One retried a half-committed batch — <b>same refund twice</b>.</li>
+      <li>Fix: revoke the credential; agents write to branches.</li>
+      <li>A 40-line validator owns the only path to main.</li>
+      <li>It rejects <b>3–4%</b> of merges. Incidents since: zero.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 26: figure -->
+<section class="slide">
+  <div class="slide-kicker">L2 · The safe write path</div>
+  <h2>Branch → validate → merge</h2>
+  <div class="body">
+    <figure>
+      <svg viewBox="0 0 800 360" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Branch, validate, merge pipeline for agent writes">
+        <rect x="0" y="0" width="800" height="360" fill="#efe8d8"/>
+        <text x="40" y="48" font-family="monospace" font-size="14" fill="#1d1a15">agent writes never touch main directly</text>
+        <rect x="40" y="110" width="200" height="110" fill="none" stroke="#93321b" stroke-width="3"/>
+        <text x="60" y="146" font-family="monospace" font-size="15" fill="#93321b">1 · BRANCH</text>
+        <text x="60" y="172" font-family="monospace" font-size="12" fill="#1d1a15">fork at LSN L</text>
+        <text x="60" y="192" font-family="monospace" font-size="12" fill="#1d1a15">zero blast radius</text>
+        <line x1="240" y1="165" x2="300" y2="165" stroke="#1d1a15" stroke-width="3"/>
+        <polygon points="300,165 286,158 286,172" fill="#1d1a15"/>
+        <rect x="300" y="110" width="200" height="110" fill="none" stroke="#93321b" stroke-width="3"/>
+        <text x="320" y="146" font-family="monospace" font-size="15" fill="#93321b">2 · VALIDATE</text>
+        <text x="320" y="172" font-family="monospace" font-size="12" fill="#1d1a15">deterministic gate</text>
+        <text x="320" y="192" font-family="monospace" font-size="12" fill="#1d1a15">invariants + tests</text>
+        <line x1="500" y1="165" x2="560" y2="165" stroke="#1d1a15" stroke-width="3"/>
+        <polygon points="560,165 546,158 546,172" fill="#1d1a15"/>
+        <rect x="560" y="110" width="200" height="110" fill="none" stroke="#93321b" stroke-width="3"/>
+        <text x="580" y="146" font-family="monospace" font-size="15" fill="#93321b">3 · MERGE</text>
+        <text x="580" y="172" font-family="monospace" font-size="12" fill="#1d1a15">replay onto main</text>
+        <text x="580" y="192" font-family="monospace" font-size="12" fill="#1d1a15">OCC check vs L</text>
+        <path d="M660 220 C 660 300, 200 300, 140 224" fill="none" stroke="#93321b" stroke-width="2.5" stroke-dasharray="9 6"/>
+        <polygon points="140,224 138,240 152,232" fill="#93321b"/>
+        <text x="250" y="318" font-family="monospace" font-size="13" fill="#93321b">conflict → re-fork from new head, agent reconciles</text>
+        <text x="40" y="86" font-family="monospace" font-size="13" fill="#1d1a15">interactive exploration → declared, replayable change set</text>
+      </svg>
+      <figcaption>Fig. 8.2 — Speculation on cheap CoW timelines; commitment through a narrow deterministic gate.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- 27 -->
+<section class="slide">
+  <div class="slide-kicker">L2 · The safe write path</div>
+  <h2>Calvin, rediscovered at the workflow layer</h2>
+  <div class="body">
+    <ul>
+      <li>Exploration was interactive; the merge is <b>declared</b>.</li>
+      <li>Known write set → one serialization point, no 2PC, no human.</li>
+      <li>The branch absorbed the interactivity.</li>
+      <li>The merge inherits the <b>auditability</b>.</li>
+      <li>That division of labor is the agentic-era transaction model.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 28: quote -->
+<section class="slide quote-slide">
+  <div class="q">A branch is a <b>transaction</b> that lived long enough to get a name.</div>
+  <cite>— Week 8 lecture notes</cite>
+</section>
+
+<!-- 29: checkpoint -->
+<section class="slide">
+  <div class="slide-kicker">Checkpoint · Discussion</div>
+  <h2>Before you leave</h2>
+  <div class="body">
+    <ul>
+      <li>ε = 4 ms, 3 shards: who acknowledges first — Calvin or Spanner? Which assumption flips it?</li>
+      <li>30% of agents crash without cleanup: how does reaper TTL R shape steady-state storage?</li>
+      <li>Merge validates the read set against commits since L: serializable? Where does write skew sneak in?</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 30: readings -->
+<section class="slide">
+  <div class="slide-kicker">Readings · Week 08</div>
+  <h2>Read before Thursday</h2>
+  <div class="body">
+    <ul>
+      <li><b>Calvin</b> — Thomson et al., SIGMOD 2012. §3 sequencer; §3.2.1 OLLP.</li>
+      <li><b>Spanner</b> — Corbett et al., OSDI 2012. §3 TrueTime; §4.1.2 commit wait.</li>
+      <li><b>Neon architecture posts</b>, 2022–24. <code>GetPage@LSN</code>, layer files, branch creation.</li>
+    </ul>
+  </div>
+</section>
+
+<script src="deck.js"></script>
+</body>
+</html>
