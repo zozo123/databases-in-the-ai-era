@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Databases in the Age of AI — An Essay</title>
+<meta name="description" content="What happens to the fifty-year-old discipline of database systems when the dominant reader of data is no longer human. An essay on storage engines, semantic layers, catalogs, and the agentic decade ahead.">
+<meta property="og:title" content="Databases in the Age of AI">
+<meta property="og:description" content="The reader changes. The physics doesn't. An essay on what agents do to databases — and what databases must do back.">
+<meta property="og:type" content="article">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500;9..144,600;9..144,900&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400;1,6..72,500&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: #f6f1e7;
+    --paper-deep: #efe8d8;
+    --ink: #1d1a15;
+    --ink-soft: #4a443a;
+    --ink-faint: #837b6c;
+    --ox: #93321b;
+    --ox-bright: #b8401f;
+    --rule: #d8cfba;
+    --mono: 'IBM Plex Mono', ui-monospace, monospace;
+    --serif: 'Newsreader', Georgia, serif;
+    --display: 'Fraunces', Georgia, serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--serif);
+    font-size: 20px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+    background-image: radial-gradient(ellipse at 20% -10%, rgba(184,64,31,.045), transparent 55%);
+  }
+  ::selection { background: var(--ox); color: var(--paper); }
+
+  /* ---------- progress bar ---------- */
+  #progress {
+    position: fixed; top: 0; left: 0; height: 3px; width: 0%;
+    background: var(--ox); z-index: 99;
+  }
+
+  /* ---------- masthead ---------- */
+  .masthead {
+    max-width: 1100px; margin: 0 auto; padding: 28px 24px 0;
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-family: var(--mono); font-size: 12px; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--ink-faint);
+  }
+  .masthead .dot { color: var(--ox); }
+
+  /* ---------- hero ---------- */
+  .hero {
+    max-width: 1100px; margin: 0 auto; padding: 9vh 24px 7vh;
+    border-bottom: 1px solid var(--ink);
+  }
+  .hero .kicker {
+    font-family: var(--mono); font-size: 13px; letter-spacing: .22em;
+    text-transform: uppercase; color: var(--ox);
+    margin-bottom: 34px; display: flex; align-items: center; gap: 14px;
+  }
+  .hero .kicker::after { content:""; height:1px; flex:1; background: var(--rule); }
+  h1 {
+    font-family: var(--display);
+    font-optical-sizing: auto;
+    font-weight: 900;
+    font-size: clamp(54px, 9.2vw, 132px);
+    line-height: .94;
+    letter-spacing: -.022em;
+    text-wrap: balance;
+  }
+  h1 em { font-style: italic; font-weight: 300; color: var(--ox); }
+  .hero .standfirst {
+    margin-top: 44px;
+    display: grid; grid-template-columns: minmax(0,1.5fr) minmax(0,1fr);
+    gap: 48px; align-items: end;
+  }
+  .standfirst p {
+    font-size: clamp(20px, 2.2vw, 26px); line-height: 1.45;
+    font-weight: 500; text-wrap: balance;
+  }
+  .standfirst .meta {
+    font-family: var(--mono); font-size: 12.5px; line-height: 2.1;
+    color: var(--ink-soft); text-align: right;
+  }
+  .standfirst .meta b { color: var(--ink); font-weight: 600; }
+  @media (max-width: 760px) {
+    .hero .standfirst { grid-template-columns: 1fr; }
+    .standfirst .meta { text-align: left; }
+  }
+
+  /* ---------- TOC ---------- */
+  nav.toc {
+    max-width: 1100px; margin: 0 auto; padding: 30px 24px;
+    border-bottom: 1px solid var(--rule);
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    gap: 6px 36px;
+  }
+  nav.toc a {
+    font-family: var(--mono); font-size: 13px; color: var(--ink-soft);
+    text-decoration: none; padding: 7px 0; display: flex; gap: 12px;
+    border-bottom: 1px dotted transparent; transition: color .15s;
+  }
+  nav.toc a:hover { color: var(--ox-bright); }
+  nav.toc a .n { color: var(--ox); min-width: 2.2em; }
+
+  /* ---------- article grid ---------- */
+  article { max-width: 1100px; margin: 0 auto; padding: 0 24px; }
+  section.chapter { padding: 84px 0 30px; }
+  .ch-head { margin-bottom: 48px; }
+  .ch-num {
+    font-family: var(--mono); font-size: 13px; letter-spacing: .2em;
+    color: var(--ox); text-transform: uppercase;
+    display: flex; align-items: center; gap: 16px; margin-bottom: 18px;
+  }
+  .ch-num::after { content: ""; flex: 1; height: 1px; background: var(--rule); }
+  h2 {
+    font-family: var(--display); font-weight: 600;
+    font-size: clamp(34px, 4.6vw, 58px); line-height: 1.04;
+    letter-spacing: -.015em; text-wrap: balance; max-width: 16ch;
+  }
+  .ch-body {
+    display: grid;
+    grid-template-columns: minmax(0, 62ch) minmax(180px, 1fr);
+    gap: 0 64px;
+  }
+  .ch-body > * { grid-column: 1; }
+  .ch-body p { margin-bottom: 1.45em; }
+  .ch-body p:last-child { margin-bottom: 0; }
+  @media (max-width: 900px) { .ch-body { grid-template-columns: 1fr; } }
+
+  /* drop cap on chapter openers */
+  p.opener::first-letter {
+    font-family: var(--display); font-weight: 900; color: var(--ox);
+    font-size: 4.4em; line-height: .78; float: left;
+    padding: .07em .12em 0 0;
+  }
+
+  /* margin notes */
+  .note {
+    grid-column: 2; align-self: start;
+    font-family: var(--mono); font-size: 12px; line-height: 1.75;
+    color: var(--ink-faint); border-top: 1px solid var(--rule);
+    padding-top: 10px; margin-bottom: 28px;
+  }
+  .note a { color: var(--ox); text-decoration: none; border-bottom: 1px dotted var(--ox); }
+  .note a:hover { color: var(--ox-bright); }
+  @media (max-width: 900px) {
+    .note { grid-column: 1; max-width: 62ch; border-left: 2px solid var(--ox); border-top: none; padding: 2px 0 2px 14px; }
+  }
+
+  /* pull quote */
+  .pull {
+    grid-column: 1 / -1;
+    font-family: var(--display); font-weight: 300; font-style: italic;
+    font-size: clamp(28px, 3.6vw, 44px); line-height: 1.18;
+    color: var(--ink); margin: 56px 0; padding: 0 0 0 28px;
+    border-left: 3px solid var(--ox); text-wrap: balance; max-width: 26ch;
+  }
+  .pull b { font-weight: 600; font-style: normal; color: var(--ox); }
+
+  /* big stats */
+  .stats {
+    grid-column: 1 / -1;
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    border: 1px solid var(--ink); margin: 48px 0;
+    background: var(--paper-deep);
+  }
+  .stat { padding: 26px 24px 22px; border-right: 1px solid var(--rule); }
+  .stat:last-child { border-right: none; }
+  .stat .v {
+    font-family: var(--display); font-weight: 900;
+    font-size: clamp(40px, 4.4vw, 60px); line-height: 1; color: var(--ox);
+    letter-spacing: -.02em;
+  }
+  .stat .l {
+    font-family: var(--mono); font-size: 11.5px; line-height: 1.6;
+    margin-top: 12px; color: var(--ink-soft); letter-spacing: .02em;
+  }
+  @media (max-width: 760px) { .stat { border-right: none; border-bottom: 1px solid var(--rule); } .stat:last-child { border-bottom: none; } }
+
+  /* inline elements */
+  .ch-body a { color: inherit; text-decoration: none; border-bottom: 1px solid rgba(147,50,27,.45); transition: border-color .15s, color .15s; }
+  .ch-body a:hover { color: var(--ox-bright); border-color: var(--ox-bright); }
+  code { font-family: var(--mono); font-size: .82em; background: var(--paper-deep); padding: 2px 6px; border-radius: 3px; border: 1px solid var(--rule); }
+  sup.fn { font-family: var(--mono); font-size: .58em; color: var(--ox); letter-spacing: 0; }
+  .smallcaps { font-variant: small-caps; letter-spacing: .04em; }
+
+  /* quote block (verbatim) */
+  blockquote.verbatim {
+    margin: 40px 0; padding: 26px 30px;
+    background: var(--paper-deep); border: 1px solid var(--rule);
+    font-size: 19px; line-height: 1.6;
+  }
+  blockquote.verbatim p { margin-bottom: .8em; }
+  blockquote.verbatim cite {
+    display: block; font-family: var(--mono); font-style: normal;
+    font-size: 12px; color: var(--ink-faint); margin-top: 14px;
+  }
+
+  /* lists */
+  .ch-body ol.essay, .ch-body ul.essay { margin: 0 0 1.45em 1.3em; }
+  .ch-body li { margin-bottom: .7em; }
+  .ch-body li::marker { font-family: var(--mono); color: var(--ox); font-size: .85em; }
+
+  /* the stages diagram */
+  .stages { grid-column: 1 / -1; margin: 48px 0; display: grid; gap: 0; border: 1px solid var(--ink); }
+  .stage { display: grid; grid-template-columns: 110px 1fr; border-bottom: 1px solid var(--rule); background: var(--paper); }
+  .stage:last-child { border-bottom: none; }
+  .stage .tag {
+    font-family: var(--mono); font-size: 12px; letter-spacing: .1em; color: var(--paper);
+    background: var(--ink); display: flex; align-items: center; justify-content: center;
+    padding: 18px 10px; text-transform: uppercase;
+  }
+  .stage:nth-child(2) .tag { background: var(--ox); }
+  .stage:nth-child(3) .tag { background: var(--ox-bright); }
+  .stage .body { padding: 20px 26px; }
+  .stage .body h4 { font-family: var(--display); font-weight: 600; font-size: 21px; margin-bottom: 6px; }
+  .stage .body p { font-size: 17px; color: var(--ink-soft); margin: 0; }
+  @media (max-width: 640px) { .stage { grid-template-columns: 1fr; } .stage .tag { padding: 8px; } }
+
+  /* predictions ledger */
+  .ledger { grid-column: 1 / -1; margin: 44px 0 8px; border-top: 2px solid var(--ink); }
+  .row {
+    display: grid; grid-template-columns: 64px 150px 1fr;
+    gap: 24px; padding: 22px 4px; border-bottom: 1px solid var(--rule);
+    align-items: baseline;
+  }
+  .row .yr { font-family: var(--display); font-weight: 900; font-size: 26px; color: var(--ink); }
+  .row .conf { font-family: var(--mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; padding-top: 6px; }
+  .conf.hi { color: var(--ox); } .conf.med { color: #a06a14; } .conf.spec { color: var(--ink-faint); }
+  .row .txt { font-size: 18.5px; line-height: 1.55; }
+  @media (max-width: 700px) { .row { grid-template-columns: 64px 1fr; } .row .conf { grid-column: 2; padding: 0; } }
+
+  /* sources */
+  .sources {
+    columns: 2; column-gap: 56px; font-family: var(--mono);
+    font-size: 12.5px; line-height: 1.9; color: var(--ink-soft);
+    grid-column: 1 / -1;
+  }
+  .sources li { break-inside: avoid; margin-bottom: 10px; list-style: none; padding-left: 2.4em; text-indent: -2.4em; }
+  .sources .k { color: var(--ox); }
+  .sources a { color: inherit; text-decoration: none; border-bottom: 1px dotted var(--rule); }
+  .sources a:hover { color: var(--ox-bright); }
+  @media (max-width: 760px) { .sources { columns: 1; } }
+
+  /* divider flourish */
+  .fleuron { text-align: center; font-family: var(--display); color: var(--ox); font-size: 22px; letter-spacing: 1.2em; padding: 26px 0 0 1.2em; grid-column: 1/-1; }
+
+  /* footer */
+  footer {
+    border-top: 1px solid var(--ink); margin-top: 90px;
+    background: var(--ink); color: var(--paper-deep);
+  }
+  .colophon {
+    max-width: 1100px; margin: 0 auto; padding: 56px 24px 64px;
+    display: grid; grid-template-columns: 1.4fr 1fr; gap: 48px;
+  }
+  .colophon h3 { font-family: var(--display); font-weight: 600; font-size: 26px; margin-bottom: 16px; color: var(--paper); }
+  .colophon p { font-size: 15.5px; line-height: 1.7; color: #b9b09c; margin-bottom: 1em; }
+  .colophon .specs { font-family: var(--mono); font-size: 12px; line-height: 2.2; color: #968d77; }
+  .colophon .specs b { color: var(--paper-deep); font-weight: 500; }
+  .colophon a { color: var(--paper); text-decoration: none; border-bottom: 1px dotted #6f6753; }
+  @media (max-width: 760px) { .colophon { grid-template-columns: 1fr; } }
+
+  /* reveal animation */
+  .reveal { opacity: 0; transform: translateY(14px); transition: opacity .7s ease, transform .7s ease; }
+  .reveal.in { opacity: 1; transform: none; }
+  @media (prefers-reduced-motion: reduce) { .reveal { opacity: 1; transform: none; transition: none; } }
+</style>
+</head>
+<body>
+<div id="progress"></div>
+
+<div class="masthead">
+  <span>TMP&nbsp;PRESS <span class="dot">●</span> ESSAY № 01</span>
+  <span>JUNE 2026</span>
+</div>
+
+<header class="hero">
+  <div class="kicker">On Data Infrastructure</div>
+  <h1>Databases in the <em>Age of AI</em></h1>
+  <div class="standfirst">
+    <p>The reader changes. The physics doesn’t. What fifty years of database systems must become when the dominant client is no longer a human — and why the winner of the agentic decade is not yet decided.</p>
+    <div class="meta">
+      <b>~6,000 words · 28 min</b><br>
+      researched by five parallel agents<br>
+      synthesized by one<br>
+      sources: 40+, cited in margin
+    </div>
+  </div>
+</header>
+
+<nav class="toc">
+  <a href="#ch1"><span class="n">I.</span> The Reader Changes</a>
+  <a href="#ch2"><span class="n">II.</span> One Correct Answer</a>
+  <a href="#ch3"><span class="n">III.</span> The Physics Doesn’t Care</a>
+  <a href="#ch4"><span class="n">IV.</span> Git for Data</a>
+  <a href="#ch5"><span class="n">V.</span> The Meaning Moat</a>
+  <a href="#ch6"><span class="n">VI.</span> Stress-Testing the Bull Case</a>
+  <a href="#ch7"><span class="n">VII.</span> The Last Human Query</a>
+  <a href="#sources"><span class="n">§</span> Sources</a>
+</nav>
+
+<article>
+
+<!-- ============ I ============ -->
+<section class="chapter reveal" id="ch1">
+  <div class="ch-head">
+    <div class="ch-num">Chapter I</div>
+    <h2>The Reader Changes</h2>
+  </div>
+  <div class="ch-body">
+    <p class="opener">For fifty years, every database ever built shared one design assumption so universal that nobody bothered to write it down: the queries come from people. A person fills a screen, an application translates it to SQL, the database answers, a person reads the result. Every layer of the stack — the connection pool sized for hundreds of clients, the optimizer tuned for a known workload, the BI dashboard polled each Monday morning — encodes the rhythm of human attention. Humans query twice a day. The systems were built accordingly.</p>
+
+    <p>That assumption just expired. In May 2025, when Databricks paid roughly a billion dollars for Neon, a serverless Postgres startup, the acquisition came with a statistic that deserves to be remembered as the moment the era turned: <b>more than 80 percent of the databases provisioned on Neon were created by AI agents, not by humans.</b> Not queried by agents — <em>created</em> by them, as casually as a function allocates a variable.</p>
+    <div class="note">CNBC, May 14 2025: Databricks acquires Neon for ~$1B; Ali Ghodsi cites the 80% agent-provisioned figure. <a href="https://www.cnbc.com/2025/05/14/databricks-is-buying-database-startup-neon-for-about-1-billion.html">cnbc.com</a></div>
+
+    <p>A month later, Anthropic published a blog post titled <em>“How Anthropic enables self-service data analytics with Claude,”</em> reporting that 95 percent of business analytics queries inside the company are now answered by an agent rather than a human analyst. A widely shared LinkedIn-style reading of that post concluded, with the confidence native to the genre, that this is why Databricks will “absolutely explode” over the next decade: agents need huge, analytic-ready, well-defined tables, Spark makes those tables cheaply, Unity Catalog governs their definitions, therefore Databricks is where the agents will get their data.</p>
+    <div class="note">Anthropic, June 3 2026. <a href="https://claude.com/blog/how-anthropic-enables-self-service-data-analytics-with-claude">claude.com/blog</a></div>
+
+    <p>This essay takes that argument seriously — more seriously, in fact, than the post takes itself. Because hidden inside the cheerful vendor syllogism is a genuinely deep question, the kind Alex Petrov spent three hundred pages of <em>Database Internals</em> teaching us how to ask: when the client changes, which parts of the database are physics, and which parts are merely habit?</p>
+
+    <p>Petrov’s book — still the best single map of how data systems actually work — has a quiet thesis running beneath the B-trees and the Paxos proofs: <em>there is no perfect database, only frozen arguments about trade-offs.</em> Every storage engine is a bet about who will read, who will write, how often, and how patiently. For half a century, all of those bets priced in a human on the other end of the wire. The agentic era doesn’t end the argument. It changes who’s arguing — from clients that query twice a day to clients that query twice a second, spawn a thousand siblings, and never get tired of checking their own work.</p>
+
+    <div class="pull">Every storage engine is a frozen argument about trade-offs. AI doesn’t end the argument — it <b>changes who’s arguing.</b></div>
+
+    <p>What follows is a tour of the stack in the order Petrov would take it: first the evidence from the one company that has actually run analytics agents at scale, then the storage physics underneath, then the new agent-native database species, then the war over meaning itself — and finally an honest accounting of who captures the value, which is where the LinkedIn syllogism gets interesting, and wrong.</p>
+  </div>
+</section>
+
+<!-- ============ II ============ -->
+<section class="chapter reveal" id="ch2">
+  <div class="ch-head">
+    <div class="ch-num">Chapter II</div>
+    <h2>One Correct Answer</h2>
+  </div>
+  <div class="ch-body">
+    <p class="opener">The Anthropic post is the most important document yet published on analytics agents, not because of what it promises but because of what it measures. The headline — 95 percent of business analytics queries automated, at roughly 95 percent aggregate accuracy — is less interesting than the ablations underneath it.</p>
+
+    <div class="stats">
+      <div class="stat"><div class="v">21%</div><div class="l">accuracy of the raw agent on Anthropic’s internal evals — frontier model, full data access, no curated context</div></div>
+      <div class="stat"><div class="v">95%+</div><div class="l">accuracy with “skills”: curated markdown encoding definitions and analyst procedure</div></div>
+      <div class="stat"><div class="v">→65%</div><div class="l">where accuracy decayed after one month without skill maintenance — context rots at the speed of schema change</div></div>
+      <div class="stat"><div class="v">+6%</div><div class="l">accuracy from an adversarial-review subagent, bought with 32% more tokens and 72% more latency</div></div>
+    </div>
+
+    <p>Read those numbers again. The model was never the bottleneck. A frontier model with full access to the warehouse scored 21 percent. The same model, handed a few dozen curated reference files and a runbook describing how a senior analyst actually works, scored above 95 — and in some domains 99. The gap between a useless analytics agent and a production one is not intelligence. It is <em>context engineering over governed definitions</em> — which is to say, it is data modeling, the least glamorous discipline in software, suddenly load-bearing for the most glamorous one.</p>
+
+    <p>The post’s central diagnosis deserves quoting verbatim, because it is the thesis of the entire agentic-analytics era:</p>
+
+    <blockquote class="verbatim">
+      <p>“Coding is an open-ended solution space that rewards the models’ creativity… In contrast, for analytics use cases, there’s often only a single correct answer using a single correct source, in which there’s no deterministic way of proving the correctness.”</p>
+      <p>“By far the most common failure is that the agent can’t map a concept (‘revenue for product X’) to the single correct table, column, and metric definition, usually because there are multiple plausible candidates with subtly different implementations… If revenue resolves to one governed dataset instead of forty plausible candidates, the problem largely disappears before the agent ever has to search.”</p>
+      <cite>— Anthropic, “How Anthropic enables self-service data analytics with Claude,” June 2026</cite>
+    </blockquote>
+
+    <p>Wrong code fails a test. A wrong metric gets pasted into a board deck and silently corrodes a decision. This asymmetry is why the post insists that <span class="smallcaps">“the most important aspect of ensuring analytics agents are accurate is via strong data foundations”</span> — dimensional models, transforms, tests, metadata — and why it notes, against the fashionable view that compute solves everything, that <span class="smallcaps">“physical rollups and caches still matter for cost and performance,”</span> so long as they derive mechanically from canonical models rather than competing with them.</p>
+    <div class="note">Trust hierarchy in the post: semantic layer › lineage › query corpus › business context. The semantic layer is “the mandatory default path for every data question.”</div>
+
+    <p>Two of the ablations are stranger and more instructive. First: giving the agent grep access to thousands of historical SQL queries — a corpus that contained correct answers for roughly 80 percent of the questions it got wrong — moved accuracy by <em>less than one point</em>. The answers existed; retrieval over an ungoverned pile couldn’t surface them. Search is not a substitute for curation. Second: Anthropic tried having the model bootstrap the semantic layer itself from raw tables and query logs. The result “produced plausible-looking definitions that encoded the very ambiguities we were trying to eliminate.” The machine, asked to invent meaning, faithfully reproduced the organization’s confusion. Their conclusion: let Claude draft the documentation, but <em>a human owns the definition</em>.</p>
+
+    <p>Independent evidence agrees with embarrassing consistency. The Spider 2.0 benchmark — 632 real enterprise text-to-SQL problems over thousand-column BigQuery and Snowflake schemas — launched with frontier models solving 17 percent, against 86.6 on the toy academic predecessor. Cube’s paired benchmark found that adding a 4-kilobyte semantic-layer document — one afternoon of analyst work — improved three different frontier models by 17 to 23 points, and that <em>“the presence or absence of the semantic-layer document accounts for essentially all of the significant variance… model choice does not.”</em> dbt Labs measured the same shape and supplied the best one-line summary in the literature: <b>“With text-to-SQL, failure looks like a plausible but incorrect answer. With the semantic layer, failure looks like an error message.”</b></p>
+    <div class="note">Spider 2.0: <a href="https://arxiv.org/abs/2411.07763">arXiv 2411.07763</a> (ICLR ’25 oral). Cube paired benchmark: <a href="https://cube.dev/blog/why-semantic-layers-make-llm-analytics-reliable-a-paired-benchmark-across-three-frontier-models">cube.dev</a>. dbt 2026 benchmark: <a href="https://docs.getdbt.com/blog/semantic-layer-vs-text-to-sql-2026">getdbt.com</a>.</div>
+
+    <p>So the LinkedIn post’s first premise survives scrutiny, strengthened: agents do need governed, analytic-ready, well-defined tables, and the companies that have them get order-of-magnitude better agents than the companies that don’t. Hold that thought. The question of <em>who profits from it</em> is four chapters away, and the answer is not a syllogism.</p>
+  </div>
+</section>
+
+<!-- ============ III ============ -->
+<section class="chapter reveal" id="ch3">
+  <div class="ch-head">
+    <div class="ch-num">Chapter III</div>
+    <h2>The Physics Doesn’t Care</h2>
+  </div>
+  <div class="ch-body">
+    <p class="opener">Descend now from semantics to storage, into Petrov country. <em>Database Internals</em> is organized as a long negotiation with the memory hierarchy: RAM at a hundred nanoseconds, NVMe at a hundred microseconds, object storage at a hundred milliseconds — five orders of magnitude between the top and the bottom, every structure in the book a scheme for avoiding random I/O on slow media. B-trees exist because binary trees have catastrophic fanout on disk. LSM-trees exist because sequential writes are cheap and random ones are not. The RUM conjecture — you may optimize read, update, and memory overheads, pick two — governs everything like a conservation law.</p>
+    <div class="note">Petrov, <i>Database Internals</i> (O’Reilly, 2019). RUM conjecture: Athanassoulis et al., EDBT 2016.</div>
+
+    <p>None of that is repealed by intelligence. An agent issuing ten thousand writes per second through Raft pays the same quorum round-trip a human application pays. S3 is exactly as far from RAM no matter how eloquent the client. What the AI era does instead is more interesting: it adds new access methods to Petrov’s taxonomy, promotes old footnotes to headlines, and shifts the workload’s center of gravity.</p>
+
+    <p><b>The new access method.</b> Petrov’s index chapters cover B-trees, LSM-trees, and hashing. The AI era adds a fourth first-class citizen: the approximate nearest-neighbor index — HNSW’s navigable small-world graphs, IVF with product quantization, and DiskANN, whose entire contribution is a deeply Petrovian move: re-imposing disk-friendly layout on a graph structure so a billion vectors fit on one node’s SSD. Vector indexes obey the old trade-off triangle conspicuously — HNSW is read-fast and memory-gluttonous, IVF trades recall for space — but they add something genuinely new: <em>a recall axis</em>. For the first time, correctness itself became a tunable parameter of the access method. And in production, vector indexes are converging on LSM-like segment-and-merge architectures with tombstoned deletes. It is Chapter 7 of Petrov, with cosine distance.</p>
+    <div class="note">HNSW: Malkov & Yashunin, 2016. DiskANN: Subramanya et al., NeurIPS 2019. Now native in SQL Server 2025, Oracle 23ai, MongoDB Atlas, Elastic, pgvector.</div>
+
+    <p><b>The confession.</b> Learned indexes — Kraska, Beutel, Dean and Polyzotis’s 2018 “The Case for Learned Index Structures,” refined by ALEX and the PGM-index — replace B-tree internals with a model of the key distribution’s CDF. Their practical wins remain narrow: read-mostly, in-memory, sorted numeric data. But their conceptual contribution is permanent. A B-tree was always an implicit statistical model of your data; learned indexes merely make it confess. The deeper agents reach into databases, the more the index, the optimizer, and the cache reveal themselves as what they always were — machine learning with worse marketing.</p>
+
+    <p><b>The buffer pool ate the database.</b> The largest structural shift since Petrov’s book went to press is disaggregation. Aurora’s slogan — <em>the log is the database</em> — became Neon’s architecture: compute ships WAL to a Paxos quorum of safekeepers while pageservers materialize pages onto S3; the “database server” dissolves into a stateless cache hierarchy over an object store. WarpStream did the same to Kafka. In Petrov’s terms, Chapter 5’s humble page cache, scaled to a datacenter, <em>became</em> the storage engine — and replication-for-durability quietly delegated itself to S3’s internal redundancy, with consensus shrinking to a small metadata plane. The WAL used to be the database’s private diary. Aurora and Neon published it.</p>
+
+    <div class="pull">Agents change the <b>demand curve</b>, not the physics. A quorum still costs a round trip, no matter how eloquent the client.</div>
+
+    <p><b>And the workload inverts.</b> When the client is an agent, the query stream changes shape in ways every layer of the engine feels. Agents fan out speculatively — bursts of schema introspection, sampling, trial aggregations, most results discarded — which makes <code>information_schema</code> a hot path and scale-to-zero compute an architectural requirement rather than a billing gimmick. Agents re-ask semantically identical questions across thousands of sessions, which promotes result caches, query fingerprinting, and incrementally-maintained materialized views from optimizations to core product. Agents tolerate staleness when exploring and demand freshness when concluding, which turns Petrov’s consistency spectrum — linearizable, causal, session, eventual — from an architect’s dilemma into a <em>price menu the client shops from per query</em>. And agents think slowly between statements: a pessimistic lock held across an LLM’s multi-second pause is poison, so optimistic MVCC validation wins by default.</p>
+
+    <p>The physics holds. The demand curve flips. What the demand curve now wants most of all is the subject of the next chapter: it wants the database to behave like git.</p>
+  </div>
+</section>
+
+<!-- ============ IV ============ -->
+<section class="chapter reveal" id="ch4">
+  <div class="ch-head">
+    <div class="ch-num">Chapter IV</div>
+    <h2>Git for Data</h2>
+  </div>
+  <div class="ch-body">
+    <p class="opener">An agent’s dream database looks like git: branch instantly, write freely, diff the result, merge or discard without ceremony. Which is to say — copy-on-write, one of the oldest tricks in Petrov’s Chapter 6, where it lived for decades as an implementation detail of LMDB’s B-trees. The agentic era’s most consistent product pattern is the promotion of that page-level trick to the product’s entire surface.</p>
+
+    <p>Neon branches a Postgres database at a WAL position in milliseconds, and markets checkpoints and instant rollback explicitly “for agents” — a fork per experiment, validated, then merged or thrown away. Databricks bought it and productized it as Lakebase, governed under Unity Catalog and reportedly growing twice as fast as the company’s warehouse product. Tiger Data answered with “Agentic Postgres” and zero-copy forks, then — on June 9, 2026, the day before this essay — launched Ghost, “a database service designed and built specifically for AI agents”: unlimited databases, hard spend caps, native MCP. AgentDB lets an agent create a database by generating a UUID, on the thesis that <em>“agents create 1000× more databases than humans.”</em> Turso rewrote SQLite in Rust so that a database is a file, not a process — no cold start, a database per agent per tenant. Supabase, where AI builders auto-provision a backend per workspace, reports that over 60 percent of new databases are spun up by AI coding tools, and raised at $10.5 billion on the strength of it.</p>
+    <div class="note">Lakebase: <a href="https://www.databricks.com/company/newsroom/press-releases/databricks-launches-lakebase-new-class-operational-database-ai-apps">databricks.com</a>. Tiger Ghost: June 9 2026. AgentDB: <a href="https://agentdb.dev/">agentdb.dev</a>. Supabase $10.5B round: June 4 2026, <a href="https://www.prnewswire.com/news-releases/supabase-raises-500m-at-10-5b-to-accelerate-lead-in-agentic-infrastructure-302791787.html">prnewswire.com</a>.</div>
+
+    <div class="stats">
+      <div class="stat"><div class="v">80%</div><div class="l">of Neon databases provisioned by agents at acquisition — the database as disposable artifact, not infrastructure</div></div>
+      <div class="stat"><div class="v">60%+</div><div class="l">of new Supabase databases created by AI coding tools, Claude Code the largest single contributor</div></div>
+      <div class="stat"><div class="v">1000×</div><div class="l">AgentDB’s thesis: how many more databases agents create than humans (directional, vendor-claimed — and directionally believable)</div></div>
+    </div>
+
+    <p>The interface changed with the lifecycle. The agent’s port of entry into a database is no longer a driver or a BI tool but MCP — the Model Context Protocol — and every serious vendor now ships an official server: Snowflake exposing Cortex Analyst as tools, Supabase splitting admin from data planes, Tiger shipping “master prompts” that amount to a packaged DBA in a system message. The cautionary tale arrived on schedule: Anthropic’s own reference Postgres MCP server was deprecated after a SQL-injection flaw bypassed its read-only restrictions. The emerging consensus — read-only credentials for production, session sandboxes, and branch-per-experiment as the safe write path — is the transaction-isolation debate of the 1980s replayed at the agent layer.</p>
+    <div class="note">Datadog Security Labs on the Postgres MCP injection: <a href="https://securitylabs.datadoghq.com/articles/mcp-vulnerability-case-study-SQL-injection-in-the-postgresql-mcp-server/">securitylabs.datadoghq.com</a>.</div>
+
+    <p>Meanwhile a genuinely new workload arrived: the agent’s own memory. Zep’s Graphiti stores knowledge as a bi-temporal graph — every edge carries the time it became true and the time it stopped being true; contradictions invalidate rather than delete. Mem0 runs an extraction-and-consolidation pipeline over a vector store and claims 90-percent token savings against stuffing full history into context. Strip the branding and the requirements are a database researcher’s wish list: hybrid retrieval (vector plus BM25 plus graph traversal) in one engine, temporal validity intervals, upsert-with-invalidate semantics, namespace-per-agent isolation. Postgres — pgvector, full-text, JSONB — and the graph databases are both claiming the workload, and the safest prediction in this essay is that “memory store” follows “vector database”: a feature, not a category.</p>
+
+    <p>One more pattern, easy to miss and historically resonant. OtterTune — Andy Pavlo’s CMU spinout that put machine learning <em>inside</em> the database to tune its knobs — shut down in 2024. The capability that survived is its mirror image: the LLM-DBA sitting <em>outside</em> the database, reaching in through MCP. AI inside the engine lost to the engine inside the AI’s toolbelt. There is a lesson there about where intelligence wants to live in the stack, and it foreshadows the value-capture argument of Chapter VI.</p>
+
+    <div class="pull">An agent’s dream database looks like <b>git</b> — which is to say, copy-on-write: the oldest trick in Petrov’s Chapter 6, promoted to the whole product.</div>
+  </div>
+</section>
+
+<!-- ============ V ============ -->
+<section class="chapter reveal" id="ch5">
+  <div class="ch-head">
+    <div class="ch-num">Chapter V</div>
+    <h2>The Meaning Moat</h2>
+  </div>
+  <div class="ch-body">
+    <p class="opener">Now the war the LinkedIn post thinks Databricks has already won. Its second premise: Unity Catalog shipped first and manages “all the definitions needed to manage analytics and agents at scale” better than anyone. The premise is half-true, and the half that’s true is the half that’s being commoditized fastest.</p>
+
+    <p>What’s true: Databricks saw earliest that the catalog — not the table format, not the engine — is where agentic gravity concentrates, and it has executed ferociously. Unity Catalog was open-sourced in June 2024 with the hyperscalers as launch partners. Metric Views (“define once, trust everywhere”) put governed measures and dimensions in the catalog itself, queryable from SQL, Genie, and external BI. The Tabular acquisition bought the creators of Iceberg; the Neon acquisition bought the agent-native OLTP layer; the company crossed a $5.4 billion run-rate growing 65 percent, was valued at $134 billion in December 2025, and by mid-2026 was reportedly raising at $165–175 billion. As execution, it is close to flawless.</p>
+    <div class="note">Run-rate and valuation: Databricks press releases; CNBC Dec 16 2025; The Information/Reuters on the 2026 round (talks, not closed). Snowflake, for scale: ~$4.3B product revenue FY2026, +25%.</div>
+
+    <p>What’s also true: <em>everyone else read the same memo.</em> Snowflake donated Polaris to Apache, where it graduated to top-level in February 2026 and became the neutral Iceberg REST standard; Horizon now reads and writes Snowflake-managed Iceberg from external engines. dbt and Fivetran merged into a ~$600M-ARR company positioning dbt as “the standard context layer for agentic analytics,” with MetricFlow going Apache 2.0. Salesforce paid $8 billion for Informatica to give Agentforce a governed data foundation. Microsoft wires Purview through OneLake; AWS exposes Glue as an Iceberg REST catalog so even Databricks can read it. Cube, AtScale, and ThoughtSpot sell the semantic layer as a portable, engine-agnostic asset — AtScale’s pitch is explicitly that <em>because</em> Iceberg commoditized compute, the semantic layer must not be owned by any one engine. The catalog wars of 2024–2026 are the SQL-dialect wars replayed at the metadata layer, and they are trending the same direction: toward open interfaces and away from moats.</p>
+    <div class="note">Polaris TLP: Feb 18 2026. dbt–Fivetran merger: Oct 13 2025. Salesforce–Informatica closed Nov 18 2025. Catalog landscape: <a href="https://dev.to/alexmercedcoder/the-state-of-apache-iceberg-catalogs-in-june-2026-265e">State of Iceberg Catalogs, June 2026</a>.</div>
+
+    <p>The evidence that semantics is where accuracy lives, however, keeps strengthening. Every vendor now publishes the same experiment with the same shape: AtScale measured Gemini at 20 percent accuracy on raw TPC-DS schema and 92.5 percent with the semantic layer. Snowflake claims Cortex Analyst doubles raw GPT-4o. Google claims LookML grounding cuts errors by two-thirds. Discount each as marketing and the independent replications still stand — Cube’s paired benchmark, dbt’s, Spider 2.0’s brutal floor. The pattern is not in dispute. The dispute is over who owns the layer that produces it.</p>
+
+    <p>And here is the inconvenient subtlety the bull case skips: <b>the semantic layer is an organizational achievement, not a product feature.</b> “Revenue” has eleven definitions at your company not because you lack a catalog but because Finance, Sales Ops, and Product genuinely disagree — bookings versus billings versus recognized — often for defensible reasons. A catalog records the disagreement; it cannot resolve it. Buying Unity Catalog and expecting clean semantics is buying Confluence and expecting clean documentation. Anthropic’s post says this plainly, twice: governance without enforcement “decays back to the multiple candidates problem,” and the definitions must be owned by humans because the alternative — letting the model invent them — reproduced “the very ambiguities we were trying to eliminate.” Governed garbage is still garbage. The vendor sells the substrate. The moat is dug by the customer, slowly, in meetings.</p>
+
+    <div class="pull">A catalog <b>records</b> the disagreement about what “revenue” means. It cannot <b>resolve</b> it. That work is organizational — and vendor-neutral.</div>
+  </div>
+</section>
+
+<!-- ============ VI ============ -->
+<section class="chapter reveal" id="ch6">
+  <div class="ch-head">
+    <div class="ch-num">Chapter VI</div>
+    <h2>Stress-Testing the Bull Case</h2>
+  </div>
+  <div class="ch-body">
+    <p class="opener">Grant everything granted so far: agents are becoming the dominant consumers of data; their accuracy depends on governed semantics; lakehouse platforms with strong catalogs are best positioned to supply them. The progression the optimists describe is real, and it is worth laying out precisely, because each stage raises the bar on the platform:</p>
+
+    <div class="stages">
+      <div class="stage">
+        <div class="tag">Stage A</div>
+        <div class="body"><h4>Humans ask questions</h4><p>“What was revenue across product lines last year?” Text-to-SQL with a human checking each answer. Needs: discoverability, metadata, certified-table tiers. Most enterprises are here.</p></div>
+      </div>
+      <div class="stage">
+        <div class="tag">Stage B</div>
+        <div class="body"><h4>Humans ask for judgment</h4><p>“What should we do to grow this product line?” The agent composes dozens of queries; humans review the conclusion, not the intermediate steps. Needs: trustworthy primitives — semantic layers, blessed rollups, lineage — because nobody audits query #37 of 60.</p></div>
+      </div>
+      <div class="stage">
+        <div class="tag">Stage C</div>
+        <div class="body"><h4>Agents patrol the estate</h4><p>Thousands of standing agents continuously scanning, pushing findings before anyone asks. Needs: machine-scale workload isolation, non-human identity and audit, cost governance — and a feedback loop where confirmed and rejected findings train the next pass.</p></div>
+      </div>
+    </div>
+
+    <p>Each stage shifts value from <em>compute over data</em> to <em>governed meaning over data</em>. That is the steelman, and it is a real thesis, not vibes. Now the stress test — six complications, each sufficient to bend the conclusion:</p>
+
+    <ol class="essay">
+      <li><b>“One correct answer” cuts both ways.</b> Analytics punishes error more than coding — but it also makes verification cheap and mechanical. An agent can compute revenue three ways, reconcile against the GL, and flag divergence; numerical reconciliation is a crisper signal than any unit test. Anthropic already buys 6 points of accuracy with an adversarial-review subagent. Curated catalogs are how you make <em>today’s</em> models accurate. Tomorrow’s may simply afford to cross-examine the data — and the cheaper verification gets, the less a pre-blessed single path is worth.</li>
+      <li><b>The GPT-6-class question.</b> A company’s metric definitions are encoded — redundantly, messily, but completely — in its query logs, dbt repos, dashboards, and Slack threads. The curated catalog is a compressed cache of that knowledge. Anthropic’s bootstrap experiment failed with 2026 models; the moat assumes it keeps failing. If a GPT-6/Claude-N-class model can decompress semantics from lineage and usage directly, the moat shrinks from “we hold the meaning” to “we hold the access logs” — weaker, and contestable.</li>
+      <li><b>Stage C is a CFO horror story.</b> Thousands of always-on agents speculatively scanning a metered lakehouse is a cloud-bill catastrophe by design. The economically rational architecture pushes speculation onto cheap embedded engines — DuckDB-class compute over extracted slices — and touches the metered platform only for blessed reads. The thesis predicts an explosion of query volume on the lakehouse; the unit economics predict the explosion happens mostly <em>off</em> it.</li>
+      <li><b>Value pools at the scarcest layer.</b> The stack is model → agent harness → semantic layer → catalog → storage. If frontier-vendor analyst agents work equally well across Databricks, Snowflake, BigQuery and Postgres — and their makers are highly motivated to ensure they do — the data platform becomes excellent, fungible plumbing under someone else’s relationship with the CFO. The Windows/Intel question, replayed: Databricks can win the workload and still not capture the increment.</li>
+      <li><b>Open formats dissolve the bind.</b> Iceberg ended the table-format war; Polaris is standardizing the catalog interface; metrics specs are following (MetricFlow back to Apache 2.0). Every layer Databricks would monetize is being wrapped in a neutral API within eighteen months of shipping — frequently with Databricks’ own participation, because openness is its sales argument against Snowflake. You cannot both commoditize a layer and own it.</li>
+      <li><b>Hyperscaler bundling.</b> Microsoft folds Fabric and Copilot agents into E5 agreements; Google folds BigQuery and Gemini into GCP commits; AWS does AWS things. “Explode over the decade” requires out-executing three distribution machines that give the competing product away — the classic mid-cap squeeze, survivable (Snowflake reaccelerated to 30 percent growth in its install base’s teeth) but not a tailwind.</li>
+    </ol>
+
+    <p>The honest synthesis: the post is directionally right that governed semantics appreciate as agents proliferate, and wrong to assume the catalog vendor automatically captures the appreciation. Semantics are an achievement vendors can <em>host</em> but cannot <em>sell</em>. “Databricks explodes” is one scenario. “Databricks becomes the superbly-paid plumbing under someone else’s agent” is at least as likely — and both are fully consistent with every fact in the Anthropic post.</p>
+  </div>
+</section>
+
+<!-- ============ VII ============ -->
+<section class="chapter reveal" id="ch7">
+  <div class="ch-head">
+    <div class="ch-num">Chapter VII</div>
+    <h2>The Last Human Query</h2>
+  </div>
+  <div class="ch-body">
+    <p class="opener">What does the decade actually look like? Some second-order effects are already legible. Machine-issued queries will exceed human-issued ones on enterprise warehouses — the only question is the multiple, and whether vendors publish the telemetry. The analytics engineer becomes a semantic engineer: less SQL authorship, more curating definitions, adjudicating metric disputes, and maintaining eval suites — Anthropic already gates each domain’s agent on a ~90 percent eval threshold and finds that 90 percent of data-model PRs ship with corresponding context changes in the same diff. CI for meaning, not just for code.</p>
+
+    <p>The dashboard — a human-polling interface — peaks and declines, replaced by conversation and push: findings delivered with provenance footers and reproducible queries attached. Natural language becomes the authoring interface while SQL persists as the verification substrate: rarely written, always inspectable. NL is the new REPL; SQL is the new assembly. And when frontier-model capability converges, the durable corporate moat is not intelligence but <em>agent-legible data plus the accumulated eval corpus</em> — every question asked, every answer confirmed or corrected: company-specific ground truth that no one can buy and no competitor can scrape.</p>
+
+    <p>Predictions, dated and falsifiable, so this essay can be graded:</p>
+
+    <div class="ledger">
+      <div class="row"><div class="yr">2027</div><div class="conf hi">High confidence</div><div class="txt">Every major platform ships a first-party catalog-grounded analyst agent; standalone text-to-SQL startups are effectively dead as a category.</div></div>
+      <div class="row"><div class="yr">2028</div><div class="conf hi">High confidence</div><div class="txt">Machine-initiated queries exceed human-initiated queries on at least one major cloud warehouse, per vendor-published telemetry.</div></div>
+      <div class="row"><div class="yr">2028</div><div class="conf hi">High confidence</div><div class="txt">“Semantic engineer” / agent-data-steward appears as a distinct title at &gt;100 enterprises; dbt-or-successor ships agent-eval CI as a core feature.</div></div>
+      <div class="row"><div class="yr">2029</div><div class="conf med">Medium</div><div class="txt">A platform offers a contractual correctness SLA on a metrics API — versioned definitions, signed lineage: the “agent contract.”</div></div>
+      <div class="row"><div class="yr">2029</div><div class="conf med">Medium</div><div class="txt">Catalog interoperability is table stakes; Unity Catalog’s proprietary surface is mostly open-API-wrapped, neutralized as lock-in.</div></div>
+      <div class="row"><div class="yr">2030</div><div class="conf med">Medium</div><div class="txt">Net-new dashboard creation declines year-over-year at major BI vendors; push and conversation are the default delivery surface.</div></div>
+      <div class="row"><div class="yr">2030</div><div class="conf med">Medium</div><div class="txt">&gt;20% of agent analytical compute runs on embedded engines (DuckDB-class) over extracted slices, not metered warehouse compute — driven purely by cost.</div></div>
+      <div class="row"><div class="yr">2031</div><div class="conf spec">Speculative</div><div class="txt">A frontier model infers a company’s metric semantics from lineage + query logs alone, matching the curated catalog on a golden-question eval — published as a benchmark.</div></div>
+      <div class="row"><div class="yr">2033</div><div class="conf spec">Speculative</div><div class="txt">The value-capture verdict is visible in revenue: data layer vs. model/agent layer. This essay puts 55/45 on the model layer taking the larger share of the increment.</div></div>
+      <div class="row"><div class="yr">2034</div><div class="conf spec">Speculative</div><div class="txt">A Fortune 500 incident — a material decision traced to an autonomous agent’s silently wrong metric — triggers the first regulatory guidance on agent-generated financial analysis.</div></div>
+    </div>
+
+    <p>Petrov closed his book on distributed consensus — the machinery by which unreliable nodes agree on a single truth despite failure, delay, and contradiction. It is hard to imagine a better metaphor for what just became the most valuable problem in enterprise software. The agents are ready. The models are nearly ready. What stands between a company and the future where its data estate answers questions, recommends actions, and patrols itself is not intelligence and was never intelligence. It is agreement — on what “revenue” means, on which table is true, on who owns the definition. The database of the AI era is, in the end, a consensus protocol that includes the humans.</p>
+
+    <p>The last human query will not be a SELECT statement. It will be the question we keep asking each other in the meeting after the agent presents its findings: <em>do we trust this number?</em> Everything in this essay — the catalogs, the semantic layers, the eval suites, the branches, the provenance footers — is infrastructure for answering yes.</p>
+
+    <div class="fleuron">❦</div>
+  </div>
+</section>
+
+<!-- ============ SOURCES ============ -->
+<section class="chapter reveal" id="sources">
+  <div class="ch-head">
+    <div class="ch-num">Appendix</div>
+    <h2>Sources &amp; Provenance</h2>
+  </div>
+  <div class="ch-body">
+    <ul class="sources" style="grid-column: 1 / -1;">
+      <li><span class="k">[01]</span> Anthropic, <a href="https://claude.com/blog/how-anthropic-enables-self-service-data-analytics-with-claude">“How Anthropic enables self-service data analytics with Claude”</a>, June 3 2026. All accuracy, decay, and ablation figures.</li>
+      <li><span class="k">[02]</span> Petrov, A., <i>Database Internals: A Deep Dive into How Distributed Data Systems Work</i>, O’Reilly, 2019.</li>
+      <li><span class="k">[03]</span> Lei et al., <a href="https://arxiv.org/abs/2411.07763">“Spider 2.0: Evaluating Language Models on Real-World Enterprise Text-to-SQL Workflows”</a>, ICLR 2025; leaderboard at <a href="https://spider2-sql.github.io/">spider2-sql.github.io</a>.</li>
+      <li><span class="k">[04]</span> Cube, <a href="https://cube.dev/blog/why-semantic-layers-make-llm-analytics-reliable-a-paired-benchmark-across-three-frontier-models">“Why Semantic Layers Make LLM Analytics Reliable”</a>, paired benchmark, 2026.</li>
+      <li><span class="k">[05]</span> dbt Labs, <a href="https://docs.getdbt.com/blog/semantic-layer-vs-text-to-sql-2026">“Semantic Layer vs Text-to-SQL”</a> benchmark, 2026.</li>
+      <li><span class="k">[06]</span> CNBC, <a href="https://www.cnbc.com/2025/05/14/databricks-is-buying-database-startup-neon-for-about-1-billion.html">Databricks–Neon acquisition</a>, May 14 2025.</li>
+      <li><span class="k">[07]</span> Databricks, <a href="https://www.databricks.com/company/newsroom/press-releases/databricks-launches-lakebase-new-class-operational-database-ai-apps">Lakebase launch</a>, June 2025; <a href="https://www.databricks.com/blog/open-sourcing-unity-catalog">Unity Catalog open-sourcing</a>, June 2024; <a href="https://docs.databricks.com/aws/en/business-semantics/metric-views/">Metric Views docs</a>.</li>
+      <li><span class="k">[08]</span> Kraska, Beutel, Dean, Polyzotis, “The Case for Learned Index Structures,” SIGMOD 2018; Ding et al., ALEX, SIGMOD 2020; Ferragina &amp; Vinciguerra, PGM-index, VLDB 2020.</li>
+      <li><span class="k">[09]</span> Malkov &amp; Yashunin, HNSW, 2016; Subramanya et al., DiskANN, NeurIPS 2019; Athanassoulis et al., RUM conjecture, EDBT 2016.</li>
+      <li><span class="k">[10]</span> Snowflake, <a href="https://www.snowflake.com/en/engineering-blog/apache-polaris-iceberg-rest-catalog/">Apache Polaris engineering blog</a>; Polaris graduated to Apache TLP Feb 18 2026; <a href="https://www.snowflake.com/en/blog/engineering/cortex-analyst-text-to-sql-accuracy-bi/">Cortex Analyst accuracy</a> (vendor-internal).</li>
+      <li><span class="k">[11]</span> Fivetran ✕ dbt Labs merger, <a href="https://www.fivetran.com/fivetran-dbt-labs-merger">Oct 13 2025</a>; Salesforce–Informatica close, <a href="https://www.salesforce.com/news/press-releases/2025/11/18/salesforce-completes-acquisition-of-informatica/">Nov 18 2025</a>.</li>
+      <li><span class="k">[12]</span> Supabase $500M at $10.5B, <a href="https://www.prnewswire.com/news-releases/supabase-raises-500m-at-10-5b-to-accelerate-lead-in-agentic-infrastructure-302791787.html">June 4 2026</a>; Tiger Data Ghost GA, June 9 2026; <a href="https://agentdb.dev/">AgentDB</a>; <a href="https://turso.tech/blog/a-deep-look-into-our-new-massive-multitenant-architecture">Turso multitenant architecture</a>.</li>
+      <li><span class="k">[13]</span> Datadog Security Labs, <a href="https://securitylabs.datadoghq.com/articles/mcp-vulnerability-case-study-SQL-injection-in-the-postgresql-mcp-server/">Postgres MCP SQL-injection case study</a>.</li>
+      <li><span class="k">[14]</span> Rasmussen et al., Zep/Graphiti, <a href="https://arxiv.org/abs/2501.13956">arXiv 2501.13956</a>; Mem0, <a href="https://arxiv.org/abs/2504.19413">arXiv 2504.19413</a>.</li>
+      <li><span class="k">[15]</span> AtScale TPC-DS semantic-layer study, <a href="https://www.hpcwire.com/bigdatawire/2024/08/15/atscale-claims-text-to-sql-breakthrough-with-semantic-layer/">BigDATAwire</a> (vendor study, public methodology).</li>
+      <li><span class="k">[16]</span> Market figures: Databricks press releases ($5.4B run-rate, Feb 2026), CNBC ($134B, Dec 2025), PYMNTS/Reuters ($165–175B talks, unconfirmed); Snowflake FY2026 <a href="https://www.sec.gov/Archives/edgar/data/0001640147/000162828026011631/fy2026q4earnings.htm">8-K</a>; <a href="https://dev.to/alexmercedcoder/the-state-of-apache-iceberg-catalogs-in-june-2026-265e">State of Iceberg Catalogs, June 2026</a>.</li>
+      <li><span class="k">[17]</span> Counter-perspectives: Benn Stancil, <a href="https://benn.substack.com/p/the-context-layer">“The context layer”</a>; MotherDuck, <a href="https://motherduck.com/blog/bird-bench-and-data-models/">“Your data model is the semantic layer”</a>; OtterTune postmortem via <a href="https://www.dbtune.com/blog/ottertune">dbtune.com</a>.</li>
+      <li><span class="k">[18]</span> All vendor-published accuracy claims (Cortex ~90%, AtScale 92.5%, Looker “two-thirds”) are self-reported and flagged as such in the text. Databricks publishes no headline Genie accuracy figure as of June 2026.</li>
+    </ul>
+  </div>
+</section>
+
+</article>
+
+<footer>
+  <div class="colophon">
+    <div>
+      <h3>Colophon</h3>
+      <p>Written in June 2026 in response to the Anthropic essay on self-service analytics and the discourse it produced. Researched by five parallel AI agents — one each for the primary source, the storage-internals lens, the catalog wars, agent-native databases, and the decade ahead — and synthesized by a sixth. Approximately forty sources; every load-bearing number is cited in the margin, and vendor-reported figures are flagged as such.</p>
+      <p>Dedicated to the proposition that the least glamorous discipline in software — data modeling — just became the most important one.</p>
+    </div>
+    <div class="specs">
+      <b>Type</b> — Fraunces · Newsreader · IBM Plex Mono<br>
+      <b>Palette</b> — paper #F6F1E7 · ink #1D1A15 · oxblood #93321B<br>
+      <b>Stack</b> — one HTML file, zero dependencies<br>
+      <b>Built with</b> — <a href="https://claude.com/claude-code">Claude Code</a> · Fable 5<br>
+      <b>License</b> — CC BY 4.0
+    </div>
+  </div>
+</footer>
+
+<script>
+  // reading progress
+  const bar = document.getElementById('progress');
+  addEventListener('scroll', () => {
+    const h = document.documentElement;
+    bar.style.width = (h.scrollTop / (h.scrollHeight - h.clientHeight) * 100) + '%';
+  }, { passive: true });
+
+  // staggered chapter reveals
+  const io = new IntersectionObserver(es => es.forEach(e => {
+    if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); }
+  }), { rootMargin: '0px 0px -8% 0px' });
+  document.querySelectorAll('.reveal').forEach(el => io.observe(el));
+</script>
+</body>
+</html>
