@@ -22,7 +22,7 @@
 <header class="page-head">
   <div class="kicker">Lab 4 · Weeks 10–12</div>
   <h1>A Semantic-Operator <em>Optimizer</em></h1>
-  <p class="standfirst">You will build three semantic operators over a Parquet corpus, then an optimizer that decides — per row — which model tier earns its tokens. The target is brutal and explicit: 10× cheaper than the naive plan, at most 2% quality loss.</p>
+  <p class="standfirst">You will build three semantic operators over a generated CSV corpus, then an optimizer that decides — per row — which model tier earns its tokens. The target is brutal and explicit: 10× cheaper than the naive plan, at most 2% quality loss.</p>
   <div class="meta"><b>Due:</b> M1 — Fri wk 10 · M2 — Fri wk 11 · M3 + report — Fri wk 12 &nbsp;·&nbsp; <b>Weight:</b> 20% of course grade &nbsp;·&nbsp; <b>Teams:</b> 2 · Python ≥ 3.12</div>
 </header>
 
@@ -44,13 +44,13 @@
 <section class="block">
   <div class="sec-label">Overview</div>
   <h2>What You’re Building</h2>
-  <p class="opener">Relational engines got fast because the optimizer, not the user, chose how to evaluate a query. Semantic query processing is at the pre-optimizer stage of that history: most pipelines today call a frontier model on every row, for every predicate, in whatever order the author happened to write them. This lab makes you build the missing layer. You will implement three semantic operators over a fixed corpus — 20,000 product reviews and 5,000 product descriptions in Parquet — and an optimizer that assigns each operator a model tier, a cascade configuration, and a position in the plan.</p>
-  <p>All model calls go through <code>llmsim</code>, a provided simulator with configurable, seeded error rates. There are no real API calls, no network, and no nondeterminism: given the same seed and the same plan, your pipeline must produce byte-identical output. This is what makes the lab gradable — and it is also a non-negotiable spec item (see the rubric’s reproducibility row).</p>
-  <p><strong>The benchmark query</strong>, fixed for everyone: <em>find the 25 products whose reviews most credibly complain about battery degradation, joining each complaint to the product whose description claims long battery life.</em> It decomposes into one <code>sem_filter</code> over reviews (P1: “complains about battery degradation”), one <code>sem_filter</code> over products (P2: “claims long battery life”), one <code>sem_join</code> (review discusses this product’s claim), and one <code>sem_topk</code> (k = 25, criterion “most credible complaint”).</p>
-  <p><strong>Target.</strong> The naive plan runs every call on the frontier tier in written order; the autograder prices it at <strong>$41.18</strong> on the benchmark seed. Your optimized plan must cost <strong>≤ $4.12</strong> while scoring within <strong>2% relative F1</strong> of the frozen gold standard for the filter/join stages and <strong>≥ 0.93 nDCG@25</strong> for the top-k stage.</p>
+  <p class="opener">Relational engines got fast because the optimizer, not the user, chose how to evaluate a query. Semantic query processing is at the pre-optimizer stage of that history: most pipelines today call a frontier model on every row, for every predicate, in whatever order the author happened to write them. This lab makes you build the missing layer. You will implement three semantic operators over a fixed corpus — 20,000 product reviews and 5,000 product descriptions in CSV — and an optimizer that assigns each operator a model tier, a cascade configuration, and a position in the plan.</p>
+  <p>All model calls go through <code>simulator.py</code>, a provided simulator with configurable, seeded error rates. There are no real API calls, no network, and no nondeterminism: given the same seed and the same plan, your pipeline must produce byte-identical output. This is what makes the lab gradable — and it is also a non-negotiable spec item (see the rubric’s reproducibility row).</p>
+  <p><strong>The benchmark query</strong>, fixed for everyone: <em>find the 25 products whose reviews most credibly complain about battery degradation, joining each complaint to the product whose description claims long battery life.</em> It decomposes into one <code>sem_filter</code> over reviews (P1: “complains about battery degradation”), one <code>sem_filter</code> over products (P2: “claims long battery life”), one <code>sem_join</code> (review discusses this product’s battery-life claim), and one <code>sem_topk</code> (k = 25, criterion “most credible battery complaint”).</p>
+  <p><strong>Target.</strong> The naive plan runs every call on the frontier tier in written order; the autograder prices it at about <strong>$205,742</strong> on the benchmark seed. Your optimized plan must cost <strong>≤ naive/10</strong> while scoring within <strong>2% relative F1</strong> of the same-seed naive plan for the join stage and <strong>≥ 0.93 nDCG@25</strong> for the top-k stage.</p>
   <h3>Non-goals and forbidden shortcuts</h3>
   <ul>
-    <li><strong>No gold-standard mining.</strong> You may read <code>gold/calibration.parquet</code> (500 labeled rows) programmatically. Opening, grepping, or training against <code>gold/test.parquet</code> is an academic-integrity violation; the file ships encrypted and the autograder holds the key.</li>
+    <li><strong>No gold-standard mining.</strong> You may read <code>calibration_reviews.csv</code> and <code>calibration_products.csv</code> (500 labeled rows in total) programmatically. The gold rules are visible in <code>simulator.py</code> — deriving labels from <code>ground_truth_filter</code>, the salt, or the planted signal fragments, in code or “by inspection,” is an academic-integrity violation; the grader re-calibrates your thresholds on a shifted split and catches it.</li>
     <li><strong>No answer caching across seeds.</strong> Memoizing within one run is fine (and expected); persisting simulator outputs to disk and replaying them on graded seeds is not.</li>
     <li><strong>No hand-tuned magic constants.</strong> Every threshold in your submitted plan must be produced by your calibration code from the calibration split. The grader re-runs calibration on a shifted split; hardcoded thresholds will visibly fail the guarantee check.</li>
     <li><strong>No real LLMs.</strong> Importing any model client disqualifies the run. The point is the optimizer, not the model.</li>
@@ -60,45 +60,44 @@
 <section class="block">
   <div class="sec-label">Provided materials</div>
   <h2>The Starter Kit</h2>
-  <p>Clone <code>data2027/lab4-starter</code>. It contains the corpus, the simulator, conformance tests, and a reference naive plan. The two Parquet files have fixed schemas: <code>reviews.parquet</code> (20,000 rows: <code>review_id&nbsp;int64</code>, <code>product_id&nbsp;int64</code>, <code>stars&nbsp;int8</code>, <code>text&nbsp;utf8</code>) and <code>products.parquet</code> (5,000 rows: <code>product_id&nbsp;int64</code>, <code>title&nbsp;utf8</code>, <code>description&nbsp;utf8</code>, <code>category&nbsp;dictionary&lt;utf8&gt;</code>). Do not re-encode them; the grader checks schema fingerprints.</p>
-  <p>The simulator exposes two tiers plus a free proxy scorer. The proxy is an embedding-similarity heuristic: cheap, biased, and exactly the kind of signal a cascade is built to exploit. Its agreement with gold is roughly 80% on this corpus — useless as a final answer, valuable as a router.</p>
-  <pre><code># llmsim — provided; treat as a sealed service. Do not modify.
-from llmsim import Simulator, Tier
+  <p>Clone <code>data2027/lab4-starter</code>. It contains the sealed simulator (<code>simulator.py</code>), the corpus generator (<code>make_data.py</code>), and the operator stubs with a working naive <code>sem_filter</code> reference (<code>operators_stub.py</code>). Running <code>python3 make_data.py</code> writes two fixed-schema CSVs: <code>reviews.csv</code> (20,000 rows: <code>review_id</code>, <code>product_id</code>, <code>stars</code>, <code>text</code>) and <code>products.csv</code> (5,000 rows: <code>product_id</code>, <code>title</code>, <code>description</code>, <code>category</code>), plus the two calibration files. Every row is a pure function of its id, so the CSVs hash identically everywhere — regenerate freely; never edit them.</p>
+  <p>The simulator exposes two tiers plus a free proxy scorer. The proxy is an embedding-similarity heuristic: cheap, biased, and exactly the kind of signal a cascade is built to exploit. Its agreement with gold is roughly 75% on this corpus — useless as a final answer, valuable as a router.</p>
+  <pre><code># simulator.py — provided; treat as a sealed service. Do not modify.
+from simulator import Simulator
 
-sim = Simulator(seed=2027)                  # deterministic per (seed, tier, prompt)
-r = sim.call(tier=Tier.CHEAP,               # Tier.CHEAP | Tier.FRONTIER
-             prompt="PREDICATE: ...\nTEXT: ...\nAnswer yes or no.",
-             max_output_tokens=8)
-r.text, r.input_tokens, r.output_tokens     # billed exactly as counted
+sim = Simulator(seed=2027)               # deterministic per (seed, tier, doc)
+keep  = sim.judge_filter(doc, predicate, tier="cheap")   # "cheap" | "frontier"
+match = sim.judge_pair(left, right, predicate, tier="frontier")
+s = sim.score_proxy(doc, predicate)      # float in [0, 1] — costs $0
+sim.ledger                               # the only meter the grader trusts
 
-s = sim.proxy_score(predicate, text)        # float in [0, 1] — costs $0
+# Operators YOU implement — operators_stub.py (signatures are frozen)
+def sem_filter(sim: Simulator, rows: Sequence[Row], predicate: str,
+               target_precision: float = 0.95,
+               plan: Optional[OpConfig] = None) -&gt; list[Row]
+def sem_join(sim: Simulator, left: Sequence[Row], right: Sequence[Row],
+             predicate: str, budget: Optional[float] = None,
+             plan: Optional[OpConfig] = None) -&gt; list[tuple[Any, Any]]
+def sem_topk(sim: Simulator, rows: Sequence[Row], criterion: str, k: int,
+             plan: Optional[OpConfig] = None) -&gt; list[Row]
 
-# Operators YOU implement — semops/ops.py (signatures are frozen)
-def sem_filter(table: pa.Table, predicate: str, *, plan: Plan,
-               sim: Simulator) -&gt; pa.ChunkedArray      # bool mask, len == table
-def sem_join(left: pa.Table, right: pa.Table, predicate: str, *,
-             plan: Plan, sim: Simulator) -&gt; pa.Table   # cols: left_id, right_id
-def sem_topk(table: pa.Table, criterion: str, k: int, *,
-             plan: Plan, sim: Simulator) -&gt; pa.Table   # k rows, ranked
-
-# Plan file — plans/optimized.json (validated against plan.schema.json)
-{
-  "order": ["P2", "P1", "JOIN", "TOPK"],
-  "ops": {
-    "P1": {"op": "sem_filter", "tier": "cheap",
-           "cascade": {"tau_lo": 0.21, "tau_hi": 0.84, "delta": 0.05}},
-    "JOIN": {"op": "sem_join", "blocker": "proxy_top_m", "m": 8, ...}
-  }
-}</code></pre>
+# The plan — Plan/OpConfig/CascadeConfig dataclasses in operators_stub.py;
+# serialize into results/ in any stable text format (the grader re-executes
+# plans, it does not trust prose)
+Plan(order=["P2", "P1", "JOIN", "TOPK"],
+     ops={"P1": OpConfig(op="sem_filter", predicate="...", tier="cheap",
+                         cascade=CascadeConfig(tau_lo=0.21, tau_hi=0.84,
+                                               delta=0.05)),
+          "JOIN": OpConfig(op="sem_join", predicate="...", blocker_m=8)})</code></pre>
   <p>Costs and latencies are part of the spec, not something you measure. Your cost model must reproduce the table below exactly; the autograder cross-checks your reported plan price against its own meter and rejects mismatches above 0.5%.</p>
   <table>
     <thead>
       <tr><th>Tier</th><th>$ / 1k input tok</th><th>$ / 1k output tok</th><th>Latency / call</th><th>Seeded error rate</th></tr>
     </thead>
     <tbody>
-      <tr><td><code>proxy_score</code></td><td>0.000</td><td>—</td><td>0.4 ms</td><td>~20% disagreement w/ gold</td></tr>
-      <tr><td><code>Tier.CHEAP</code></td><td>0.025</td><td>0.10</td><td>180 ms</td><td>8% flip, biased toward “yes”</td></tr>
-      <tr><td><code>Tier.FRONTIER</code></td><td>0.750</td><td>3.00</td><td>1,400 ms</td><td>1% flip, symmetric</td></tr>
+      <tr><td><code>proxy</code></td><td>0.000</td><td>—</td><td>0.4 ms</td><td>25% disagreement w/ gold at the 0.5 threshold</td></tr>
+      <tr><td><code>cheap</code></td><td>0.025</td><td>0.10</td><td>180 ms</td><td>8% flip, biased toward “yes”</td></tr>
+      <tr><td><code>frontier</code></td><td>0.750</td><td>3.00</td><td>1,400 ms</td><td>2% flip; false positives rarer than misses</td></tr>
     </tbody>
   </table>
   <p>Latency matters only for the stretch metric (critical-path latency under 32-way concurrency, reported but lightly weighted). Dollars are the primary axis.</p>
@@ -107,8 +106,8 @@ def sem_topk(table: pa.Table, criterion: str, k: int, *,
 <section class="block">
   <div class="sec-label">Milestone 1 · due Friday, week 10</div>
   <h2>Correct Operators, Naive Plan</h2>
-  <p>Implement all three operators so the conformance suite (<code>pytest tests/conformance</code>) passes under the all-frontier plan. Operator semantics are statistical contracts, frozen as follows. <code>sem_filter(T, p)</code> returns a boolean mask whose positives must achieve precision ≥ 0.95 and recall ≥ 0.90 against gold when run all-frontier. <code>sem_join(L, R, p)</code> returns the set of (left_id, right_id) pairs satisfying p; the naive implementation evaluates the full cross-product of surviving rows — that quadratic blowup is precisely what makes the naive plan cost $41. <code>sem_topk(T, c, k)</code> must return a full ranking of k rows; ties broken by ascending row id so output stays deterministic. Internally you may implement it as a tournament or pairwise-comparison sort, but the comparison count is billed like everything else.</p>
-  <p>Deliverable: green conformance run plus <code>results/m1.json</code> (the grader writes it) showing naive-plan cost within 0.5% of $41.18. Nothing clever yet — M1 is the control arm of every experiment you will run later.</p>
+  <p>Implement all three operators so the conformance checks pass under the all-frontier plan (start from the provided smoke test: <code>python3 operators_stub.py</code>). Operator semantics are statistical contracts, frozen as follows. <code>sem_filter(T, p)</code> returns the satisfying rows, in input order; the kept set must achieve precision ≥ 0.95 and recall ≥ 0.90 against gold when run all-frontier. <code>sem_join(L, R, p)</code> returns the set of (left_id, right_id) pairs satisfying p; the naive implementation evaluates the full cross-product of surviving rows — that quadratic blowup (~1.73M pair judgements) is precisely what makes the naive plan cost $205,742. <code>sem_topk(T, c, k)</code> must return a full ranking of k rows; ties broken by ascending row id so output stays deterministic. Internally you may implement it as a tournament or pairwise-comparison sort, but the comparison count is billed like everything else.</p>
+  <p>Deliverable: green conformance run plus <code>results/m1.json</code> (the grader writes it) showing naive-plan cost within 0.5% of $205,742. Nothing clever yet — M1 is the control arm of every experiment you will run later.</p>
 </section>
 
 <section class="block">
@@ -156,13 +155,13 @@ def sem_topk(table: pa.Table, criterion: str, k: int, *,
         <line x1="600" y1="180" x2="658" y2="180" stroke="#93321b" stroke-width="1.5" marker-end="url(#arr)"/>
         <text x="630" y="166" text-anchor="middle" font-size="11" fill="#93321b">low conf.</text>
         <!-- calibration note -->
-        <text x="285" y="318" text-anchor="middle" font-size="11" fill="#837b6c">τ_lo, τ_hi from 500-row calibration split,</text>
+        <text x="285" y="318" text-anchor="middle" font-size="11" fill="#837b6c">τ_lo, τ_hi from the calibration CSVs (400 reviews / 100 products),</text>
         <text x="285" y="336" text-anchor="middle" font-size="11" fill="#837b6c">Hoeffding lower bound, δ = 0.05</text>
       </g>
     </svg>
     <figcaption>Fig. 1 — Cascade routing for one semantic predicate. The free proxy score splits rows into accept / reject / escalate bands; only the uncertain middle pays for tokens, and only its hardest residue reaches the frontier tier. Thresholds are chosen so the shortcuts hold precision ≥ 0.95 and recall ≥ 0.90 with probability ≥ 1 − δ.</figcaption>
   </figure>
-  <p>For the join, the cross-product is the enemy: cascade thresholds alone won’t save you if you score 20,000 × 5,000 pairs. Use the proxy as a <em>blocker</em> — keep only each review’s top-m products by proxy score (m is a plan parameter; calibrate the recall loss it induces the same way you calibrate τ<sub>lo</sub>). Deliverable: <code>results/m2.json</code> with per-predicate thresholds, their lower bounds, and an empirical check that quality held on calibration.</p>
+  <p>For the join, the cross-product is the enemy: cascade thresholds alone won’t save you if you score 20,000 × 5,000 pairs. Use the proxy as a <em>blocker</em> — keep only each review’s top-m products by proxy score (<code>blocker_m</code> in the plan; calibrate the recall loss it induces the same way you calibrate τ<sub>lo</sub>). Deliverable: <code>results/m2.json</code> with per-predicate thresholds, their lower bounds, and an empirical check that quality held on calibration.</p>
   <div class="pull">The optimizer’s job is not to avoid the frontier model — it is to <b>spend it</b> only where it changes the answer.</div>
 </section>
 
@@ -172,13 +171,13 @@ def sem_topk(table: pa.Table, criterion: str, k: int, *,
   <p>Now make it an optimizer. Your planner reads the operator DAG, estimates each predicate’s selectivity and per-row cost from a 200-row pilot sample (pilot calls are billed — budget for them), and emits the cheapest valid ordering. The classical rule survives translation: run the most selective, cheapest-per-row filter first. P2 runs over 5,000 products; P1 over 20,000 reviews; whether filtering products first shrinks the join enough to pay for itself is exactly the question your cost model must answer with numbers, not vibes.</p>
   <p><strong>Required experiments</strong> — all on seeds {2027, 2028, 2029}, reporting mean and range:</p>
   <ul>
-    <li><strong>E1 — naive:</strong> all-frontier, written order. Your control row.</li>
-    <li><strong>E2 — cascade:</strong> calibrated cascades, written order.</li>
-    <li><strong>E3 — cascade + reorder:</strong> the full optimizer, plus join blocking.</li>
-    <li><strong>E4 — Pareto sweep:</strong> vary δ ∈ {0.20, 0.10, 0.05, 0.01} and m ∈ {4, 8, 16}; plot cost (x, log scale) vs quality (y) and trace the frontier.</li>
-    <li><strong>E5 — ablation table:</strong> E3 with each mechanism removed one at a time (no cascade, no reorder, no blocking, no cheap tier), one row each: cost, F1, nDCG@25.</li>
+    <li><strong>E-NAIVE:</strong> all-frontier, written order. Your control row.</li>
+    <li><strong>E-CASCADE:</strong> calibrated cascades, written order.</li>
+    <li><strong>E-CASCADE+REORDER:</strong> the full optimizer, plus join blocking.</li>
+    <li><strong>Pareto sweep:</strong> vary δ ∈ {0.20, 0.10, 0.05, 0.01} and <code>blocker_m</code> ∈ {4, 8, 16}; plot cost (x, log scale) vs quality (y) and trace the frontier.</li>
+    <li><strong>Ablation table:</strong> E-CASCADE+REORDER with each mechanism removed one at a time (no cascade, no reorder, no blocking, no cheap tier), one row each: cost, F1, nDCG@25.</li>
   </ul>
-  <p><strong>Report format</strong> (<code>report.pdf</code>, ≤ 4 pages, two columns fine): §1 plan diagram of your final E3 plan with tier and threshold annotations; §2 the E1–E3 cost/quality table; §3 the Pareto figure with your submitted operating point marked; §4 the ablation table plus one paragraph per row explaining the mechanism’s marginal contribution; §5 a short “where the guarantee leaks” discussion — every cascade has one, and finding yours is worth more than pretending it doesn’t exist. Submit the repo with <code>plans/optimized.json</code>, <code>results/</code>, and <code>report.pdf</code>; <code>make grade</code> must reproduce every number in the report.</p>
+  <p><strong>Report format</strong> (<code>report.pdf</code>, ≤ 4 pages, two columns fine): §1 plan diagram of your final E-CASCADE+REORDER plan with tier and threshold annotations; §2 the E-NAIVE / E-CASCADE / E-CASCADE+REORDER cost/quality table; §3 the Pareto figure with your submitted operating point marked; §4 the ablation table plus one paragraph per row explaining the mechanism’s marginal contribution; §5 a short “where the guarantee leaks” discussion — every cascade has one, and finding yours is worth more than pretending it doesn’t exist. Submit the repo with your serialized plan, <code>results/</code>, and <code>report.pdf</code>; <code>python3 run_experiments.py</code> must reproduce every number in the report.</p>
 </section>
 
 <section class="block">
@@ -189,12 +188,12 @@ def sem_topk(table: pa.Table, criterion: str, k: int, *,
       <tr><th>Component</th><th>Pts</th><th>What we check</th></tr>
     </thead>
     <tbody>
-      <tr><td>Operator correctness (M1)</td><td>20</td><td>Conformance suite green; all-frontier plan meets precision/recall contracts; naive cost within 0.5% of $41.18.</td></tr>
+      <tr><td>Operator correctness (M1)</td><td>20</td><td>Conformance suite green; all-frontier plan meets precision/recall contracts; naive cost within 0.5% of $205,742.</td></tr>
       <tr><td>Cascade calibration (M2)</td><td>20</td><td>Thresholds derived from calibration code; lower bounds computed correctly; guarantee holds on the grader’s shifted split.</td></tr>
-      <tr><td>Optimizer &amp; target (M3)</td><td>20</td><td>≤ $4.12 at ≤ 2% F1 loss and ≥ 0.93 nDCG@25 on held-out seeds. Partial credit on a published sliding scale from 5× / 4%.</td></tr>
-      <tr><td>Experiments E1–E5</td><td>20</td><td>All five present, multi-seed, with ranges; Pareto frontier monotone-checked; ablations isolate one mechanism each.</td></tr>
+      <tr><td>Optimizer &amp; target (M3)</td><td>20</td><td>≤ naive/10 at ≤ 2% F1 loss and ≥ 0.93 nDCG@25 on held-out seeds. Partial credit on a published sliding scale from 5× / 4%.</td></tr>
+      <tr><td>Experiments &amp; sweeps</td><td>20</td><td>All five present, multi-seed, with ranges; Pareto frontier monotone-checked; ablations isolate one mechanism each.</td></tr>
       <tr><td>Report</td><td>10</td><td>≤ 4 pages; every claim traceable to <code>results/</code>; honest §5 failure analysis.</td></tr>
-      <tr><td>Reproducibility &amp; code</td><td>10</td><td><code>make grade</code> reproduces all numbers byte-identically; no forbidden shortcuts; readable plan/calibration code.</td></tr>
+      <tr><td>Reproducibility &amp; code</td><td>10</td><td><code>python3 run_experiments.py</code> reproduces all numbers byte-identically; no forbidden shortcuts; readable plan/calibration code.</td></tr>
     </tbody>
   </table>
   <p>Late policy: 10 points per 24 h on the affected milestone, capped at 48 h. The quality threshold is a cliff, not a slope — a plan at 2.4% loss grades as a 5×-tier plan no matter how cheap it is. That asymmetry is deliberate; it is how production systems are judged too.</p>

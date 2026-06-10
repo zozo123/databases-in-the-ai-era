@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Lab 3: Text-to-SQL Agent + Eval Harness — DATA 2027</title>
-<meta name="description" content="Build an analytics agent over a 200-table enterprise schema, a BIRD-style eval set with a pinned-snapshot grader, and a semantic layer — then reproduce the 21→95 curve in miniature.">
+<meta name="description" content="Build an analytics agent over a 126-table enterprise schema, a BIRD-style eval set with a pinned-snapshot grader, and a semantic layer — then reproduce the 21→95 curve in miniature.">
 <meta name="theme-color" content="#f6f1e7">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23f6f1e7'/%3E%3Cellipse cx='50' cy='28' rx='30' ry='12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 28v44c0 6.6 13.4 12 30 12s30-5.4 30-12V28' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 50c0 6.6 13.4 12 30 12s30-5.4 30-12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -22,7 +22,7 @@
 <header class="page-head">
   <div class="kicker">Lab 3 · Weeks 9–10</div>
   <h1>Text-to-SQL Agent + Eval <em>Harness</em></h1>
-  <p class="standfirst">You will build an analytics agent over a deliberately hostile 200-table enterprise schema — and, more importantly, the evaluation harness that tells you whether it actually works. The agent is half the lab; the measurement is the other half.</p>
+  <p class="standfirst">You will build an analytics agent over a deliberately hostile 126-table enterprise schema — and, more importantly, the evaluation harness that tells you whether it actually works. The agent is half the lab; the measurement is the other half.</p>
   <div class="meta"><b>Due:</b> Fri Week 10, 23:59 · <b>Weight:</b> 20% of course grade · <b>Teams:</b> pairs &nbsp;·&nbsp; <b>Submit:</b> Git tag <code>lab3-final</code> + <code>report/ablation.md</code></div>
 </header>
 
@@ -57,17 +57,17 @@
 <section class="block">
   <div class="sec-label">Provided materials</div>
   <h2>The Warehouse You Are Given</h2>
-  <p>You receive a snapshot of the data warehouse of <em>Cordovan Retail Co.</em>, a synthetic mid-size retailer: 200 tables across the schemas <code>finance</code>, <code>orders</code>, <code>returns</code>, <code>marketing</code>, <code>analytics</code>, and a legacy area. The data is synthetic but the dysfunction is faithfully reproduced. Three traps are documented here because every real warehouse has them; finding the rest is part of the lab.</p>
+  <p>You receive a snapshot of the data warehouse of <em>Vantage Retail Group</em>, a synthetic mid-size retailer: 126 tables across the schemas <code>finance</code>, <code>sales</code>, <code>orders</code>, <code>returns</code>, <code>marketing</code>, <code>web</code>, <code>hr</code>, and <code>ops</code>, plus a legacy graveyard left in place. The data is synthetic but the dysfunction is faithfully reproduced. Three traps are documented here because every real warehouse has them; finding the rest is part of the lab.</p>
   <ul>
-    <li><strong>Three revenue variants.</strong> <code>orders.order_lines.line_amount</code> is gross and includes cancelled orders; <code>finance.revenue_recognized</code> is accrual-based and lags shipment by up to 30 days; <code>analytics.v_net_revenue</code> is gross minus returns and is the canonical definition for almost all reporting questions. A naive agent picks whichever it retrieves first.</li>
-    <li><strong>Two definitions of “active user.”</strong> <code>marketing.active_users_30d</code> counts any tracked event in a 30-day window; finance defines an active user as one with ≥1 completed order in 30 days. Both are legitimate. Questions that say “active users” without qualification are answerable only with a stated definition — your semantic layer must pick one and say so.</li>
-    <li><strong>Deprecated tables left in place.</strong> The <code>orders_v1.*</code> schema and <code>dim_customer_legacy</code> (41 tables in total) were frozen on 2024-06-30 and never dropped. They have plausible names, no FK constraints, and silently stale data. Any query touching them after that date is wrong by construction.</li>
+    <li><strong>Three revenue variants.</strong> <code>sales.rev_billed</code> is invoice-line grain on the billed date and includes tax and shipping; <code>finance.bookings</code> is order-header grain at placement, includes later-cancelled orders, and is in local currency; <code>finance.revenue_recognized</code> is accrual-based, lags shipment by up to 30 days, and is the canonical definition for almost all reporting questions. A naive agent picks whichever it retrieves first.</li>
+    <li><strong>Two definitions of “active user.”</strong> <code>web.active_users_daily</code> counts any tracked event in a 1-day window, bots included; <code>marketing.active_users</code> is a daily snapshot of a 30-day rolling window with fraud-flagged accounts excluded. Both are legitimate. Questions that say “active users” without qualification are answerable only with a stated definition — your semantic layer must pick one and say so.</li>
+    <li><strong>Deprecated tables left in place.</strong> Fourteen legacy tables (<code>*_old</code>, <code>*_v1</code>, <code>*_bak</code>) were frozen at various cutover dates — e.g. <code>finance.revenue_recognized_v1</code> at 2024-06-30, <code>orders.orders_old</code> at 2024-09-30 — and never dropped. They have plausible names, no FK constraints, and silently stale data. Any query touching them after their freeze date is wrong by construction.</li>
   </ul>
   <table>
     <thead><tr><th>File</th><th>What it is</th><th>You may modify?</th></tr></thead>
     <tbody>
-      <tr><td><code>warehouse.duckdb</code></td><td>Pinned snapshot, logical date frozen at <strong>2025-11-30</strong>; SHA-256 in <code>MANIFEST</code></td><td>No — read-only</td></tr>
-      <tr><td><code>schema_catalog.json</code></td><td>All 200 tables: columns, types, row counts, free-text comments (some comments are stale on purpose)</td><td>No</td></tr>
+      <tr><td><code>vrg_snapshot_2025-11-30.duckdb</code></td><td>Pinned snapshot, logical date frozen at <strong>2025-11-30</strong>; SHA-256 in <code>MANIFEST</code></td><td>No — read-only</td></tr>
+      <tr><td><code>schema_student.sql</code></td><td>Full DDL for all 126 tables: columns, types, defaults, free-text column comments (some comments are stale on purpose)</td><td>No</td></tr>
       <tr><td><code>grader/grade.py</code></td><td>Grader stub with the <code>check()</code> signature below and 4 example test cases</td><td>Yes — you implement it</td></tr>
       <tr><td><code>agent/</code></td><td>Empty package + course proxy client; budget accounting built in</td><td>Yes — your code</td></tr>
       <tr><td><code>eval/questions.jsonl</code></td><td>Empty; Milestone 1 fills it with 50 records</td><td>Yes — you write it</td></tr>
@@ -102,7 +102,7 @@
       <!-- snapshot -->
       <ellipse cx="626" cy="170" rx="80" ry="14" fill="none" stroke="#1d1a15" stroke-width="1.5"/>
       <path d="M546 170 v44 c0 8 36 14 80 14 s80 -6 80 -14 v-44" fill="none" stroke="#1d1a15" stroke-width="1.5"/>
-      <text x="566" y="206">warehouse.duckdb</text><text x="572" y="222" class="s">pinned @ 2025-11-30</text>
+      <text x="566" y="206">pinned snapshot</text><text x="538" y="222" class="s">vrg_snapshot_2025-11-30.duckdb</text>
       <line x1="626" y1="96" x2="626" y2="156" stroke="#1d1a15" stroke-width="1.5"/>
       <!-- harness row -->
       <rect x="16" y="272" width="150" height="56" fill="none" stroke="#1d1a15" stroke-width="1.5"/>
@@ -127,16 +127,14 @@
 <section class="block">
   <div class="sec-label">Milestone 1 · end of Week 9, Wed</div>
   <h2>Eval Set &amp; Grader</h2>
-  <p>Write 50 questions in BIRD style: a natural-language question, optional <code>evidence</code> (a hint an analyst would plausibly have), gold SQL, and the gold answer materialized from the snapshot. Distribution constraints — at least 10 questions joining 3+ tables; at least 8 that hit a trap metric (revenue or active-user); at least 5 unanswerable without choosing between contested definitions; at least 5 whose naive answer comes from a deprecated table. Every gold query must be deterministic on the snapshot (no <code>now()</code>, no unordered <code>LIMIT</code> without a tiebreaker).</p>
+  <p>Write 50 questions in BIRD style: a natural-language question, a <code>difficulty</code> rating, gold SQL, and the expected result shape; gold answers are materialized once from the snapshot and frozen. Distribution constraints — at least 10 questions joining 3+ tables; at least 8 that hit a trap metric (revenue or active-user); at least 5 unanswerable without choosing between contested definitions; at least 5 whose naive answer comes from a deprecated table. Every gold query must be deterministic on the snapshot (no <code>now()</code>, no unordered <code>LIMIT</code> without a tiebreaker).</p>
   <p>One record per line in <code>eval/questions.jsonl</code>, exactly these fields:</p>
   <pre><code># eval/questions.jsonl — one JSON object per line
-{"qid": "q017",
- "question": "What was net revenue in EMEA in Q3 2025?",
- "evidence": "Fiscal quarters align with calendar quarters.",
- "gold_sql": "SELECT round(sum(net_amount),2) FROM analytics.v_net_revenue ...",
- "gold_answer": [[1834201.55]],          # rows as JSON arrays, canonical order
- "tags": ["trap:revenue", "multi-join"],
- "ordered": false}                        # true only if the question implies ranking
+{"id": "q06",
+ "difficulty": "medium",
+ "question": "What was total revenue in Q3 2025?",
+ "gold_sql": "SELECT SUM(amount_usd) FROM finance.revenue_recognized ...",
+ "expected_shape": "scalar"}              # or "table"
 
 # grader/grade.py — the contract you implement
 def check(qid: str, predicted_sql: str,
@@ -146,7 +144,7 @@ Verdict = {"ok": bool,
            "error_class": None | "wrong-join" | "wrong-metric"
                         | "hallucinated-column" | "stale-table" | "other"}
 </code></pre>
-  <p><strong>Grader semantics (normative).</strong> A prediction is correct iff it executes without error <em>and</em> its result matches the gold answer as an unordered multiset of rows (ordered comparison when <code>"ordered": true</code>), after normalization: project to gold arity by position, compare floats with tolerance <code>1e-6</code> relative or <code>1e-9</code> absolute, render dates as ISO-8601, treat <code>NULL</code> as distinct from 0 and from the empty string. An empty predicted result matching an empty gold result is <em>not</em> automatically correct — see Pitfalls. On failure, the classifier assigns one error class by precedence: <em>hallucinated-column</em> (binder error on a nonexistent column/table) → <em>stale-table</em> (any reference into <code>orders_v1.*</code> or <code>dim_customer_legacy</code>) → <em>wrong-metric</em> (correct row grain, wrong measure column or aggregate) → <em>wrong-join</em> (row-count or grain mismatch traceable to join structure) → <em>other</em>.</p>
+  <p><strong>Grader semantics (normative).</strong> A prediction is correct iff it executes without error <em>and</em> its result matches the gold answer as an unordered multiset of rows (ordered comparison when the question implies ranking), after normalization: project to gold arity by position, compare floats with tolerance <code>1e-6</code> relative or <code>1e-9</code> absolute, render dates as ISO-8601, treat <code>NULL</code> as distinct from 0 and from the empty string. An empty predicted result matching an empty gold result is <em>not</em> automatically correct — see Pitfalls. On failure, the classifier assigns one error class by precedence: <em>hallucinated-column</em> (binder error on a nonexistent column/table) → <em>stale-table</em> (any reference into a frozen legacy table — <code>*_old</code>, <code>*_v1</code>, <code>*_bak</code>) → <em>wrong-metric</em> (correct row grain, wrong measure column or aggregate) → <em>wrong-join</em> (row-count or grain mismatch traceable to join structure) → <em>other</em>.</p>
   <p>Ship an adversarial grader test suite: ≥10 hand-built near-miss cases (wrong query, right-looking answer) that your grader must reject, checked in under <code>grader/tests/</code>.</p>
 </section>
 
@@ -155,7 +153,7 @@ Verdict = {"ok": bool,
   <h2>The Agent Baseline</h2>
   <p>Implement the agent loop in <code>agent/</code>. Three stages are required; how you implement each is your design space, and your report must defend the choices.</p>
   <ul>
-    <li><strong>Schema retrieval.</strong> You may not stuff all 200 tables into context. Hard budget: at most 20 tables and 8,000 schema tokens per question. Embedding search over <code>schema_catalog.json</code>, keyword match, FK-graph expansion — anything goes within budget, and the budget is enforced by the proxy.</li>
+    <li><strong>Schema retrieval.</strong> You may not stuff all 126 tables into context. Hard budget: at most 20 tables and 8,000 schema tokens per question. Embedding search over <code>schema_student.sql</code>, keyword match, FK-graph expansion — anything goes within budget, and the budget is enforced by the proxy.</li>
     <li><strong>SQL generation.</strong> Single dialect (DuckDB). The generator sees the question, the retrieved schema slice, and — in semantic-layer configurations only — the relevant YAML entries.</li>
     <li><strong>Self-check.</strong> Execute the candidate with a <code>LIMIT 20</code> probe. On binder errors, runtime errors, empty results, or a self-assessed implausibility (your heuristic — document it), revise. At most 3 repair rounds; at most 12 LLM calls per question end-to-end; at most 16k context tokens per call. Exceeding any budget marks the question failed.</li>
   </ul>
@@ -167,26 +165,32 @@ Verdict = {"ok": bool,
   <h2>Semantic Layer &amp; the Ablation Table</h2>
   <p>Write <code>semantic_layer.yaml</code>: a Cube-style document defining canonical measures, dimensions, join paths, and explicit anti-patterns. It is a contract about the <em>schema</em>, written as if for human analysts; it must never reference your eval questions. Format (normative — the autograder parses it):</p>
   <pre><code># semantic_layer.yaml — Cube-style, parsed by the autograder
+version: 1
+dialect: duckdb
+snapshot_logical_date: 2025-11-30
+
 cubes:
-  - name: net_revenue
-    sql_table: analytics.v_net_revenue
+  - name: revenue
+    sql_table: finance.revenue_recognized
     description: >
-      Canonical revenue: gross order lines minus returns.
+      Canonical revenue: accrual basis, net of contract discounts.
       Use for any unqualified "revenue" question.
+    filters:
+      - sql: "posting_status = 'posted'"
     measures:
-      - { name: amount, sql: net_amount, type: sum, format: usd }
+      - { name: amount, sql: amount_usd, type: sum, format: usd }
     dimensions:
-      - { name: order_date, sql: order_date, type: time }
-      - { name: region,     sql: region,     type: string }
+      - { name: recognized_date, sql: recognized_date, type: time }
+      - { name: cost_center_id,  sql: cost_center_id,  type: number }
     joins:
-      - name: dim_customer
-        sql: "{net_revenue}.customer_id = {dim_customer}.id"
+      - name: order_lines
+        sql: "{revenue}.order_line_id = {order_lines}.order_line_id"
         relationship: many_to_one
     anti_patterns:
-      - "orders.order_lines.line_amount is gross and includes
-         cancelled orders; never use it as revenue."
-      - "orders_v1.* and dim_customer_legacy are frozen at
-         2024-06-30; never query them."
+      - "sales.rev_billed is invoice-line grain on the billed date and
+         INCLUDES tax and shipping; it is billing, not revenue."
+      - "finance.revenue_recognized_v1 was frozen at the 2024-06-30
+         ERP cutover; never query it."
 </code></pre>
   <p>Then run every configuration below against the <em>same</em> 50 questions and fill the ablation table. This table, completed with your numbers and a per-class reading of <em>why</em> each delta happened, is the centerpiece of your report. Reproduce the lecture’s 21→95 curve in miniature: A0 should sit near the left end, A3 near the right, and the table should show which component moved which error class.</p>
   <table>
@@ -243,7 +247,7 @@ cubes:
   <p>Submit short written answers (½ page each) with the corresponding milestone. They are graded for engagement with your own measurements, not for matching an answer key.</p>
   <div class="exercise">
     <div class="ex-head">Checkpoint 3.1 · with Milestone 1</div>
-    <div class="ex-body"><p>Execution accuracy on a pinned snapshot can still mark wrong queries correct. Construct two concrete pairs (gold SQL, wrong-but-passing SQL) against the Cordovan schema, explain the coincidence each exploits, and state which normalization rule or adversarial test in your grader closes the hole — or why it can’t be closed without a second snapshot.</p></div>
+    <div class="ex-body"><p>Execution accuracy on a pinned snapshot can still mark wrong queries correct. Construct two concrete pairs (gold SQL, wrong-but-passing SQL) against the Vantage schema, explain the coincidence each exploits, and state which normalization rule or adversarial test in your grader closes the hole — or why it can’t be closed without a second snapshot.</p></div>
   </div>
   <div class="exercise">
     <div class="ex-head">Checkpoint 3.2 · with Milestone 2</div>

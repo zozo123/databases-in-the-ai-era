@@ -23,7 +23,7 @@
   <div class="kicker">Lab 2 · Weeks 5–8</div>
   <h1>Mini-Neon — Copy-on-Write Pages over <em>Object</em> Storage</h1>
   <p class="standfirst">Neon rebuilt Postgres storage as a log-structured index over S3; you will do the same in miniature. By the end of week 8 your pageserver hands 50 concurrent agents their own writable branch of one database — and cleans up after the 40 that wander off.</p>
-  <div class="meta"><b>Out:</b> Fri, week 5 · <b>Due:</b> Fri, week 8, 23:59 &nbsp;·&nbsp; <b>Weight:</b> 25% of course grade · <b>Teams:</b> pairs &nbsp;·&nbsp; <b>Language:</b> any with an S3 client (Go, Rust, Python shims provided)</div>
+  <div class="meta"><b>Out:</b> Fri, week 5 · <b>Due:</b> Fri, week 8, 23:59 &nbsp;·&nbsp; <b>Weight:</b> 25% of course grade · <b>Teams:</b> pairs &nbsp;·&nbsp; <b>Language:</b> any with an S3 client (Go skeleton provided)</div>
 </header>
 
 <main>
@@ -133,29 +133,33 @@
 // s3://lab2-&lt;team&gt;/branches/&lt;name&gt;.json
 //   authoritative branch metadata; LIST is never the source of truth
 
-// ---- reference API (Go-flavored pseudocode) ------------------------
+// ---- reference API (stubbed in pageserver.go / branch.go) ----------
 type LSN uint64
 type PageID uint32
 
-func IngestWAL(rec []byte) (LSN, error)        // validate crc32c, append
-func Flush() error                             // seal open layer, PUT to S3
-func GetPage(branch string, p PageID,
-             at LSN) ([]byte, error)           // exactly 8192 bytes
-func CreateBranch(name, parent string,
-                  at LSN) error                // O(metadata); no page I/O
-func DeleteBranch(name string) error           // mark dead; GC reclaims
-func RunGC(horizon time.Duration) (GCReport, error) // two-phase, safe</code></pre>
+func (ps *Pageserver) IngestWAL(ctx context.Context, tl TimelineID,
+        rec []byte) (LSN, error)               // validate crc32c, append
+func (ps *Pageserver) Flush(ctx context.Context) error
+                                               // seal open layer, PUT to S3
+func (ps *Pageserver) GetPage(ctx context.Context, branch string,
+        p PageID, at LSN) ([]byte, error)      // exactly 8192 bytes
+func (ps *Pageserver) CreateBranch(ctx context.Context, name, parent string,
+        at LSN) (*BranchMeta, error)           // O(metadata); no page I/O
+func (ps *Pageserver) DeleteBranch(ctx context.Context,
+        name string) error                     // mark dead; GC reclaims
+func (ps *Pageserver) RunGC(ctx context.Context, horizon, idle,
+        grace time.Duration) (GCReport, error) // two-phase, safe</code></pre>
 </section>
 
 <section class="block">
   <div class="sec-label">Provided Materials</div>
   <h2>What Is in the Starter Kit</h2>
   <div class="reads-block">
-    <div class="read-row"><div class="n">1</div><div class="t"><i>lab2-starter</i> repository.<span class="v">MinIO docker-compose, thin S3 client shims for Go/Rust/Python, Makefile with `make conform`, `make swarm`, `make frontier`</span></div></div>
+    <div class="read-row"><div class="n">1</div><div class="t"><i>lab2-starter</i> repository.<span class="v">Go skeleton — types.go and storage.go complete, pageserver.go and branch.go stubbed — plus the MinIO docker one-liner in the README</span></div></div>
     <div class="read-row"><div class="n">2</div><div class="t"><i>walgen</i> — deterministic WAL generator.<span class="v">seeded streams; seeds 1–9 are the grading seeds; emits records in the wire format above</span></div></div>
     <div class="read-row"><div class="n">3</div><div class="t">Conformance vectors.<span class="v">(seed, page, lsn) → sha256 of the expected page image; 1,000 sampled historical reads per seed</span></div></div>
-    <div class="read-row"><div class="n">4</div><div class="t"><i>swarm</i> harness.<span class="v">spawns 50 agent processes, each branching from one parent and running a read/write mix; 40 exit without calling DeleteBranch</span></div></div>
-    <div class="read-row"><div class="n">5</div><div class="t">Report template <code>report/REPORT.md</code>.<span class="v">required headers for the ablation table, the Pareto plot, and the GC safety argument</span></div></div>
+    <div class="read-row"><div class="n">4</div><div class="t">Swarm workload (via <i>walgen</i>).<span class="v">main.wal plus agent-001…agent-050.wal and plan.json; your demo driver branches 50 agents from one parent, deletes 10, abandons 40</span></div></div>
+    <div class="read-row"><div class="n">5</div><div class="t">Report format (you write <code>report/REPORT.md</code>).<span class="v">required headers for the ablation table, the Pareto plot, and the GC safety argument</span></div></div>
   </div>
 </section>
 
@@ -206,7 +210,7 @@ func RunGC(horizon time.Duration) (GCReport, error) // two-phase, safe</code></p
   <h2>GC and the 50-Branch Swarm</h2>
   <p>Immutable layers are shared down the ancestry tree, so deletion needs a real argument, not a TTL. Your report must state and defend the safety invariant — a sufficient form: <em>a layer on timeline <code>T</code> may be deleted only if, for every live branch whose ancestry passes through <code>T</code>, every readable LSN that could resolve through that layer is already covered by a newer image layer at or below it.</em> “Readable” is defined by your retention policy: each branch’s head, plus a PITR horizon, plus every descendant’s <code>fork_lsn</code>. Note that a layer entirely older than every head can still be load-bearing if it sits below a fork — see Pitfalls.</p>
   <p>Run GC in two phases: mark candidates against a snapshot of authoritative branch metadata, wait out a grace epoch (in-flight <code>GetPage</code> calls may hold a stale layer map), then issue DELETEs. Branch abandonment is a policy you choose and justify — e.g. <code>state = dead</code>, or <code>live</code> with <code>last_read_at</code> older than a configured idle horizon.</p>
-  <p>Finally, the demo: <code>make swarm</code> creates 50 branches from one parent and runs concurrent agents against them; 40 abandon their branch without cleanup. After GC, the 10 surviving branches must pass conformance reads, and bucket bytes attributable solely to abandoned branches must be reclaimed. The harness prints both numbers.</p>
+  <p>Finally, the demo: your driver replays the <code>walgen</code> swarm workload, creating 50 branches from one parent and running each agent’s WAL against its own branch; 10 call <code>DeleteBranch</code> and 40 are abandoned without cleanup. After GC, the surviving branches must pass conformance reads, and bucket bytes attributable solely to deleted and abandoned branches must be reclaimed. Your driver prints both numbers.</p>
   <p><strong>Exit criteria:</strong> zero wrong reads after GC across three consecutive swarm runs; reclaimed-bytes ratio reported; safety argument written.</p>
 </section>
 
@@ -261,7 +265,7 @@ func RunGC(horizon time.Duration) (GCReport, error) // two-phase, safe</code></p
   <p>Answer in <code>report/CHECKPOINTS.md</code>; graded with the report. These are designed so that a correct implementation makes them easy and a confused one makes them impossible.</p>
   <div class="exercise">
     <div class="ex-head">Checkpoint 2.1 · resolution trace</div>
-    <div class="ex-body"><p>Timeline <code>main</code> holds <code>img__0-99__0x10</code>, <code>del__0-99__0x10-0x30</code>, <code>img__0-99__0x30</code>, <code>del__0-99__0x30-0x48</code>, <code>del__0-99__0x48-0x70</code>. Branch <code>agent-07</code> forks at <code>0x48</code> and holds <code>del__0-99__0x48-0x5e</code>. For <code>GetPage("agent-07", 9, 0x5a)</code>, list every object read, in order, with the timeline hop marked; give the cold-cache GET count; then repeat for <code>at = 0x44</code> and explain why the child’s delta layer is not consulted.</p></div>
+    <div class="ex-body"><p>Timeline <code>main</code> holds <code>img__0-99__10</code>, <code>del__0-99__10-30</code>, <code>img__0-99__30</code>, <code>del__0-99__30-48</code>, <code>del__0-99__48-70</code>. Branch <code>agent-07</code> forks at <code>0x48</code> and holds <code>del__0-99__48-5e</code>. For <code>GetPage("agent-07", 9, 0x5a)</code>, list every object read, in order, with the timeline hop marked; give the cold-cache GET count; then repeat for <code>at = 0x44</code> and explain why the child’s delta layer is not consulted.</p></div>
   </div>
   <div class="exercise">
     <div class="ex-head">Checkpoint 2.2 · the cost of a branch</div>

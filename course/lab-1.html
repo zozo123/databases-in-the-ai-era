@@ -45,7 +45,7 @@
   <div class="sec-label">Overview &amp; Goals</div>
   <h2>What You Are Building</h2>
   <p class="opener">Agents read and write the same store in the same breath: an upsert of a tool result is followed, milliseconds later, by a semantic search over everything written so far. Classical vector databases assume a mostly-static corpus and rebuild indexes offline; classical LSM-trees ingest fast but cannot answer “what is <em>near</em> this embedding?” In this lab you build <strong>VLSM</strong>, an LSM engine in which every SSTable carries a <em>vector segment</em>: a block of scalar-quantized embeddings plus a serialized HNSW graph over them. Searches fan out across the memtable and every level’s graphs; compaction merges graphs instead of throwing them away.</p>
-  <p>The lab has four milestones. Milestone 1 is a file format. Milestone 2 is an index. Milestone 3 is the heart of the lab — compaction that preserves index work. Milestone 4 turns your engine into evidence: a harness, a frontier, and an ablation table. Each milestone has an acceptance test in the provided test suite (<code>cargo test --features grading</code>); passing it is necessary but not sufficient for full credit.</p>
+  <p>The lab has four milestones. Milestone 1 is a file format. Milestone 2 is an index. Milestone 3 is the heart of the lab — compaction that preserves index work. Milestone 4 turns your engine into evidence: a harness, a frontier, and an ablation table. Each milestone has an acceptance test in the grading suite (<code>cargo test --features grading</code>, distributed at the end of Week 2); passing it is necessary but not sufficient for full credit.</p>
   <div class="pull">We grade the <b>frontier</b>, not the point. A system that can’t trade memory for recall isn’t tuned — it’s stuck.</div>
   <p>Fix these workload parameters unless a milestone says otherwise: vector dimension <code>D = 768</code> (f32 source vectors), cosine distance over L2-normalized inputs (so you may implement it as negative dot product), <code>k = 10</code> for all recall figures, and the synthetic agent trace produced by the provided generator with seed 2027. “Recall@10” always means recall against exact f32 brute-force search over the <em>live</em> (non-deleted, latest-version) rows.</p>
 </section>
@@ -53,107 +53,110 @@
 <section class="block">
   <div class="sec-label">Provided Materials</div>
   <h2>The Skeleton</h2>
-  <p>Clone <code>data2027/vlsm-skeleton</code>. It is a small but real engine — roughly 3,000 lines — and it already passes its own key–value test suite. You get:</p>
+  <p>Clone <code>data2027/vlsm-skeleton</code>. It is a small but real engine — roughly 1,000 lines — and it already passes its own key–value test suite. You get:</p>
   <ul>
-    <li><strong>Memtable</strong> (<code>memtable.rs</code>): a concurrent skiplist mapping keys to values, with each entry optionally carrying an f32 vector. Flush threshold 64&nbsp;MiB.</li>
-    <li><strong>SSTable writer/reader</strong> (<code>sstable.rs</code>): prefix-compressed data blocks, a block index, a bloom filter, and a footer. The reader serves <code>get</code> via mmap.</li>
-    <li><strong>Leveled compaction stub</strong> (<code>compact.rs</code>): level picking, file selection, and the merge iterator over key–value pairs are done; the function body that would handle vector segments is <code>todo!()</code>.</li>
-    <li><strong>Manifest &amp; recovery</strong> (<code>manifest.rs</code>): you should not need to touch this.</li>
-    <li><strong>Workload generator</strong> (<code>bin/agentgen.rs</code>): emits the Milestone 4 trace.</li>
+    <li><strong>Core types &amp; <code>Engine</code> trait</strong> (<code>lib.rs</code>): <code>Key</code>/<code>Value</code>/<code>DocId</code>/<code>Vector</code>, <code>EngineConfig</code>/<code>HnswParams</code>, the error enum, and <code>ParetoRow</code>.</li>
+    <li><strong>Memtable</strong> (<code>memtable.rs</code>): a <code>BTreeMap</code> mapping keys to values, with vectors in a <code>DocId</code>-keyed side-table and brute-force <code>knn</code>. Flush threshold 64&nbsp;MiB.</li>
+    <li><strong>SSTable writer &amp; format spec</strong> (<code>sstable.rs</code>): the normative byte layout in its doc comments, a working <code>SstWriter</code> (codec 0 = raw f32), and a reference <code>crc32c</code>; <code>SstReader</code> is <code>todo!()</code> — Milestone 1.</li>
+    <li><strong>Workload generator</strong> (<code>workload.rs</code>): emits the Milestone 4 trace, with brute-force ground truth per query.</li>
+    <li><strong>Smoke harness</strong> (<code>src/bin/bench.rs</code>): replays the trace against the memtable; the seed of your Milestone 4 harness.</li>
   </ul>
   <p>The public surface you extend, abridged:</p>
-<pre><code>// crates/vlsm/src/lib.rs — provided unless marked YOU WRITE
-pub struct Db { /* manifest, levels, memtable */ }
-
-impl Db {
-    pub fn put(&amp;self, key: &amp;[u8], val: &amp;[u8], vec: Option&lt;&amp;[f32]&gt;) -&gt; Result&lt;()&gt;;
-    pub fn delete(&amp;self, key: &amp;[u8]) -&gt; Result&lt;()&gt;;
-    pub fn get(&amp;self, key: &amp;[u8]) -&gt; Result&lt;Option&lt;Vec&lt;u8&gt;&gt;&gt;;
-    pub fn flush(&amp;self) -&gt; Result&lt;()&gt;;                  // memtable → L0
-    pub fn compact(&amp;self, level: usize) -&gt; Result&lt;()&gt;;  // stub inside
-    pub fn search(&amp;self, query: &amp;[f32], k: usize, ef: usize)
-        -&gt; Result&lt;Vec&lt;(RowId, f32)&gt;&gt;;                   // YOU WRITE
+<pre><code>// src/lib.rs — provided; the memtable implements it, your Db must too
+pub trait Engine {
+    fn put(&amp;mut self, key: Key, value: Value, vector: Option&lt;Vector&gt;)
+        -&gt; Result&lt;Option&lt;DocId&gt;&gt;;
+    fn get(&amp;self, key: &amp;[u8]) -&gt; Result&lt;Option&lt;Value&gt;&gt;;
+    fn scan(&amp;self, start: &amp;[u8], end: &amp;[u8]) -&gt; Result&lt;Vec&lt;(Key, Value)&gt;&gt;;
+    fn knn(&amp;self, query: &amp;Vector, k: usize, ef: usize)
+        -&gt; Result&lt;Vec&lt;(DocId, f32)&gt;&gt;;
 }
 
-// sstable.rs
+// src/sstable.rs — writer provided (codec 0)
 impl SstWriter {
-    pub fn add(&amp;mut self, key: &amp;[u8], val: &amp;[u8]) -&gt; Result&lt;()&gt;;
+    pub fn new(path: impl Into&lt;PathBuf&gt;, dim: usize) -&gt; SstWriter;
+    pub fn add(&amp;mut self, key: &amp;[u8], value: &amp;[u8],
+               vector: Option&lt;(DocId, &amp;Vector)&gt;) -&gt; Result&lt;()&gt;;
+    pub fn add_tombstone(&amp;mut self, key: &amp;[u8]) -&gt; Result&lt;()&gt;;
     pub fn finish(self) -&gt; Result&lt;SstMeta&gt;;
-    pub fn attach_vector_segment(&amp;mut self, seg: VectorSegmentBuilder); // YOU WRITE
 }
 
-// vseg.rs — YOU WRITE (Milestones 1–2)
-pub struct VectorSegmentBuilder { /* quantize, build graph, serialize */ }
-pub struct VectorSegment      { /* zero-copy reader over mmap bytes  */ }
-pub struct HnswGraph          { /* build, search, (de)serialize     */ }
+// src/sstable.rs — YOU WRITE (Milestones 1–2): the todo!() stubs
+impl SstReader {
+    pub fn open(path: &amp;Path) -&gt; Result&lt;SstReader&gt;;
+    pub fn get(&amp;self, key: &amp;[u8]) -&gt; Result&lt;Option&lt;Value&gt;&gt;;
+    pub fn scan(&amp;self, start: &amp;[u8], end: &amp;[u8]) -&gt; Result&lt;Vec&lt;(Key, Option&lt;Value&gt;)&gt;&gt;;
+    pub fn vector(&amp;self, ordinal: u32) -&gt; Result&lt;Vector&gt;;
+    pub fn knn(&amp;self, query: &amp;Vector, k: usize, ef: usize)
+        -&gt; Result&lt;Vec&lt;(DocId, f32)&gt;&gt;;                   // Milestone 2
+}
 
-// compact.rs — YOU WRITE (Milestone 3)
-pub fn merge_graphs(srcs: &amp;[&amp;VectorSegment], live: &amp;RowIdFilter,
-                    params: HnswParams) -&gt; (VectorSegmentBuilder, MergeStats);</code></pre>
-  <p><code>RowId</code> is a <code>u64</code>: the high 32 bits identify the SSTable, the low 32 bits the ordinal of the row within it. The provided merge iterator hands you, for each surviving row, its old <code>RowId</code> and its new ordinal — exactly the remap table Milestone 3 needs.</p>
+// new modules — YOU WRITE (Milestones 2–3): HNSW build/search/serialize,
+// a Db (memtable + levels) implementing Engine, and graph-merging
+// compaction, e.g.
+pub fn merge_graphs(srcs: &amp;[&amp;SstReader], live: &amp;DocIdFilter,
+                    params: HnswParams) -&gt; (SstWriter, MergeStats);</code></pre>
+  <p><code>DocId</code> is a <code>u64</code>, assigned sequentially in put order, one per vectored version; each segment’s row-id map takes a graph ordinal to its <code>DocId</code>. The workload generator pre-assigns the same sequence in <code>Op::Upsert::doc_id</code> — replay the trace in order, exactly once, and ground-truth ids match engine ids with no translation table.</p>
 </section>
 
 <section class="block">
   <div class="sec-label">Milestone 1</div>
   <h2>The Vector Segment Format</h2>
-  <p>Every SSTable that contains at least one vectored row carries one vector segment, written after the bloom filter and before the footer; the footer gains a <code>vseg_offset</code> field (0 if absent). All integers are little-endian. Every section starts at a 64-byte-aligned offset (pad with zeros), so the reader can hand out aligned zero-copy slices from the mmap. The layout:</p>
+  <p>Every <code>.sst</code> file holds six sections — header, key block, vector codes, codebook, row-id map, HNSW adjacency — followed by a 64-byte footer at EOF that points backward at all of them. All integers are little-endian. Every section starts at a 64-byte-aligned offset (pad with zeros), so the reader can hand out aligned zero-copy slices from the mmap. The layout:</p>
 
   <figure>
-    <svg viewBox="0 0 800 360" role="img" aria-label="Byte layout of an SSTable with a vector segment, expanded into its six sections">
+    <svg viewBox="0 0 800 360" role="img" aria-label="Byte layout of an SSTable: header, key block, vector sections, footer; the vector sections expanded below">
       <text x="20" y="30" font-family="IBM Plex Mono, monospace" font-size="12" fill="#1d1a15">sstable-000042.sst</text>
-      <rect x="20"  y="42" width="200" height="48" fill="none" stroke="#1d1a15" stroke-width="1.5"/>
-      <rect x="220" y="42" width="90"  height="48" fill="none" stroke="#1d1a15" stroke-width="1.5"/>
-      <rect x="310" y="42" width="80"  height="48" fill="none" stroke="#1d1a15" stroke-width="1.5"/>
-      <rect x="390" y="42" width="290" height="48" fill="none" stroke="#93321b" stroke-width="2.5"/>
+      <rect x="20"  y="42" width="100" height="48" fill="none" stroke="#1d1a15" stroke-width="1.5"/>
+      <rect x="120" y="42" width="170" height="48" fill="none" stroke="#1d1a15" stroke-width="1.5"/>
+      <rect x="290" y="42" width="390" height="48" fill="none" stroke="#93321b" stroke-width="2.5"/>
       <rect x="680" y="42" width="100" height="48" fill="none" stroke="#1d1a15" stroke-width="1.5"/>
-      <text x="120" y="70" font-family="IBM Plex Mono, monospace" font-size="11" fill="#1d1a15" text-anchor="middle">data blocks</text>
-      <text x="265" y="70" font-family="IBM Plex Mono, monospace" font-size="11" fill="#1d1a15" text-anchor="middle">index</text>
-      <text x="350" y="70" font-family="IBM Plex Mono, monospace" font-size="11" fill="#1d1a15" text-anchor="middle">bloom</text>
-      <text x="535" y="64" font-family="IBM Plex Mono, monospace" font-size="11" fill="#93321b" text-anchor="middle">vector segment</text>
-      <text x="535" y="80" font-family="IBM Plex Mono, monospace" font-size="10" fill="#93321b" text-anchor="middle">(this lab)</text>
-      <text x="730" y="70" font-family="IBM Plex Mono, monospace" font-size="11" fill="#1d1a15" text-anchor="middle">footer</text>
-      <line x1="390" y1="90" x2="20"  y2="168" stroke="#93321b" stroke-width="1" stroke-dasharray="4 4"/>
+      <text x="70"  y="64" font-family="IBM Plex Mono, monospace" font-size="11" fill="#1d1a15" text-anchor="middle">header</text>
+      <text x="70"  y="80" font-family="IBM Plex Mono, monospace" font-size="10" fill="#1d1a15" text-anchor="middle">32 B</text>
+      <text x="205" y="70" font-family="IBM Plex Mono, monospace" font-size="11" fill="#1d1a15" text-anchor="middle">key block</text>
+      <text x="485" y="64" font-family="IBM Plex Mono, monospace" font-size="11" fill="#93321b" text-anchor="middle">vector sections</text>
+      <text x="485" y="80" font-family="IBM Plex Mono, monospace" font-size="10" fill="#93321b" text-anchor="middle">(this lab)</text>
+      <text x="730" y="64" font-family="IBM Plex Mono, monospace" font-size="11" fill="#1d1a15" text-anchor="middle">footer</text>
+      <text x="730" y="80" font-family="IBM Plex Mono, monospace" font-size="10" fill="#1d1a15" text-anchor="middle">64 B</text>
+      <line x1="290" y1="90" x2="20"  y2="168" stroke="#93321b" stroke-width="1" stroke-dasharray="4 4"/>
       <line x1="680" y1="90" x2="780" y2="168" stroke="#93321b" stroke-width="1" stroke-dasharray="4 4"/>
-      <rect x="20"  y="168" width="110" height="56" fill="none" stroke="#93321b" stroke-width="1.5"/>
-      <rect x="130" y="168" width="210" height="56" fill="none" stroke="#1d1a15" stroke-width="1.5"/>
-      <rect x="340" y="168" width="130" height="56" fill="none" stroke="#1d1a15" stroke-width="1.5"/>
-      <rect x="470" y="168" width="120" height="56" fill="none" stroke="#1d1a15" stroke-width="1.5"/>
-      <rect x="590" y="168" width="130" height="56" fill="none" stroke="#93321b" stroke-width="2.5"/>
-      <rect x="720" y="168" width="60"  height="56" fill="none" stroke="#1d1a15" stroke-width="1.5"/>
-      <text x="75"  y="192" font-family="IBM Plex Mono, monospace" font-size="11" fill="#93321b" text-anchor="middle">header</text>
-      <text x="75"  y="208" font-family="IBM Plex Mono, monospace" font-size="10" fill="#93321b" text-anchor="middle">32 B</text>
-      <text x="235" y="192" font-family="IBM Plex Mono, monospace" font-size="11" fill="#1d1a15" text-anchor="middle">codes</text>
-      <text x="235" y="208" font-family="IBM Plex Mono, monospace" font-size="10" fill="#1d1a15" text-anchor="middle">N×D × i8</text>
-      <text x="405" y="192" font-family="IBM Plex Mono, monospace" font-size="11" fill="#1d1a15" text-anchor="middle">scale/bias</text>
-      <text x="405" y="208" font-family="IBM Plex Mono, monospace" font-size="10" fill="#1d1a15" text-anchor="middle">2×D × f32</text>
-      <text x="530" y="192" font-family="IBM Plex Mono, monospace" font-size="11" fill="#1d1a15" text-anchor="middle">row-id map</text>
-      <text x="530" y="208" font-family="IBM Plex Mono, monospace" font-size="10" fill="#1d1a15" text-anchor="middle">N × u64</text>
-      <text x="655" y="192" font-family="IBM Plex Mono, monospace" font-size="11" fill="#93321b" text-anchor="middle">HNSW</text>
-      <text x="655" y="208" font-family="IBM Plex Mono, monospace" font-size="10" fill="#93321b" text-anchor="middle">CSR graph</text>
-      <text x="750" y="192" font-family="IBM Plex Mono, monospace" font-size="11" fill="#1d1a15" text-anchor="middle">vfooter</text>
-      <text x="750" y="208" font-family="IBM Plex Mono, monospace" font-size="10" fill="#1d1a15" text-anchor="middle">56 B</text>
+      <rect x="20"  y="168" width="230" height="56" fill="none" stroke="#1d1a15" stroke-width="1.5"/>
+      <rect x="250" y="168" width="180" height="56" fill="none" stroke="#1d1a15" stroke-width="1.5"/>
+      <rect x="430" y="168" width="160" height="56" fill="none" stroke="#1d1a15" stroke-width="1.5"/>
+      <rect x="590" y="168" width="190" height="56" fill="none" stroke="#93321b" stroke-width="2.5"/>
+      <text x="135" y="192" font-family="IBM Plex Mono, monospace" font-size="11" fill="#1d1a15" text-anchor="middle">vector codes</text>
+      <text x="135" y="208" font-family="IBM Plex Mono, monospace" font-size="10" fill="#1d1a15" text-anchor="middle">N×D · codec 0/1/2</text>
+      <text x="340" y="192" font-family="IBM Plex Mono, monospace" font-size="11" fill="#1d1a15" text-anchor="middle">codebook</text>
+      <text x="340" y="208" font-family="IBM Plex Mono, monospace" font-size="10" fill="#1d1a15" text-anchor="middle">scale/bias · PQ</text>
+      <text x="510" y="192" font-family="IBM Plex Mono, monospace" font-size="11" fill="#1d1a15" text-anchor="middle">row-id map</text>
+      <text x="510" y="208" font-family="IBM Plex Mono, monospace" font-size="10" fill="#1d1a15" text-anchor="middle">N × u64</text>
+      <text x="685" y="192" font-family="IBM Plex Mono, monospace" font-size="11" fill="#93321b" text-anchor="middle">HNSW</text>
+      <text x="685" y="208" font-family="IBM Plex Mono, monospace" font-size="10" fill="#93321b" text-anchor="middle">CSR graph</text>
       <line x1="20" y1="248" x2="780" y2="248" stroke="#93321b" stroke-width="1"/>
       <text x="20"  y="272" font-family="IBM Plex Mono, monospace" font-size="11" fill="#1d1a15">every section 64-B aligned · all integers little-endian</text>
-      <text x="20"  y="294" font-family="IBM Plex Mono, monospace" font-size="11" fill="#1d1a15">vfooter = 6 × u64 section offsets + u32 crc32c + u32 pad</text>
-      <text x="20"  y="316" font-family="IBM Plex Mono, monospace" font-size="11" fill="#93321b">HNSW: per-layer CSR — u32 offsets[n+1], u32 neighbors[], u32 entry, u8 max_layer</text>
+      <text x="20"  y="294" font-family="IBM Plex Mono, monospace" font-size="11" fill="#1d1a15">footer = 6 × u64 section offsets + u32 crc32c + u32 'VSFT' + u64 pad</text>
+      <text x="20"  y="316" font-family="IBM Plex Mono, monospace" font-size="11" fill="#93321b">HNSW: u32 num_layers, u32 entry_point, then per-layer CSR — u32 node_count, u32 offsets[n+1], u32 neighbors[]</text>
       <text x="20"  y="338" font-family="IBM Plex Mono, monospace" font-size="11" fill="#1d1a15">reader is zero-copy: cast mmap slices, never deserialize into owned structs</text>
     </svg>
-    <figcaption>Fig. 1 — VLSM on-disk layout. Top: an SSTable with the vector segment between bloom filter and footer. Bottom: the six sections of the segment. The vfooter is written last and points backward at every section, so a reader seeks to it first.</figcaption>
+    <figcaption>Fig. 1 — VLSM on-disk layout. Top: an SSTable with the vector sections between key block and footer. Bottom: the vector sections expanded. The footer is written last and points backward at every section, so a reader seeks to it first.</figcaption>
   </figure>
 
   <table>
     <thead><tr><th>Section</th><th>Field</th><th>Type / size</th><th>Meaning</th></tr></thead>
     <tbody>
-      <tr><td rowspan="5">header (32 B)</td><td><code>magic</code></td><td><code>u64</code> = <code>0x56534547_30303031</code></td><td>ASCII “VSEG0001”; reject anything else</td></tr>
+      <tr><td rowspan="7">header (32 B)</td><td><code>magic</code></td><td><code>[u8; 8]</code></td><td>ASCII “VSST0001”; reject anything else</td></tr>
+      <tr><td><code>version</code></td><td><code>u32</code></td><td>1</td></tr>
       <tr><td><code>dim</code></td><td><code>u32</code></td><td>vector dimension D (768 here)</td></tr>
-      <tr><td><code>count</code></td><td><code>u32</code></td><td>number of vectors N</td></tr>
-      <tr><td><code>codec</code></td><td><code>u8</code></td><td>0 = raw f32, 1 = per-dimension i8 scalar quant</td></tr>
-      <tr><td><code>reserved</code></td><td>15 B, zero</td><td>future codecs; readers must ignore</td></tr>
-      <tr><td>codes</td><td>—</td><td><code>N × D × i8</code></td><td>row-major quantized vectors; code <code>c</code> decodes as <code>scale[j]·c + bias[j]</code></td></tr>
-      <tr><td>scale/bias</td><td>—</td><td><code>2 × D × f32</code></td><td>per-dimension affine params, computed over this segment’s vectors</td></tr>
-      <tr><td>row-id map</td><td>—</td><td><code>N × u64</code></td><td>graph ordinal → <code>RowId</code>; sorted by ordinal</td></tr>
-      <tr><td>HNSW</td><td>—</td><td>see Fig. 1</td><td>empty in Milestone 1 (offset = 0); filled in Milestone 2</td></tr>
-      <tr><td>vfooter (56 B)</td><td>—</td><td><code>6 × u64</code> + <code>u32</code> crc32c + <code>u32</code> pad</td><td>section offsets relative to segment start; CRC covers header through HNSW</td></tr>
+      <tr><td><code>entry_count</code></td><td><code>u32</code></td><td>rows in the key block</td></tr>
+      <tr><td><code>vector_count</code></td><td><code>u32</code></td><td>number of vectors N (may be 0)</td></tr>
+      <tr><td><code>codec</code></td><td><code>u8</code></td><td>0 = raw f32, 1 = per-dimension i8 scalar quant, 2 = PQ</td></tr>
+      <tr><td><code>reserved</code></td><td>7 B, zero</td><td>future codecs; readers must ignore</td></tr>
+      <tr><td>key block</td><td>—</td><td><code>entry_count</code> records</td><td>per record: <code>key_len: u32 · val_len: u32 · flags: u32</code> (bit0 = tombstone) · <code>vec_ordinal: u32</code> (<code>0xFFFF_FFFF</code> = no vector), then key and value bytes; keys strictly increasing</td></tr>
+      <tr><td>codes</td><td>—</td><td><code>N × D</code> codes</td><td>row-major vectors; codec 0 = f32, codec 1 = i8 — code <code>c</code> decodes as <code>scale[j]·c + bias[j]</code>; codec 2 = PQ u8</td></tr>
+      <tr><td>codebook</td><td>—</td><td><code>m_pq: u32 · k_pq: u32</code> + params</td><td>codec 1: <code>D × f32</code> scales then <code>D × f32</code> biases, computed over this segment’s vectors; codec 2: PQ centroids</td></tr>
+      <tr><td>row-id map</td><td>—</td><td><code>N × u64</code></td><td>graph ordinal → <code>DocId</code>; sorted by ordinal</td></tr>
+      <tr><td>HNSW</td><td>—</td><td>see Fig. 1</td><td>empty in Milestone 1 (<code>num_layers = 0</code>); filled in Milestone 2</td></tr>
+      <tr><td>footer (64 B)</td><td>—</td><td><code>6 × u64</code> + <code>u32</code> crc32c + <code>u32</code> magic “VSFT” + <code>u64</code> pad</td><td>section offsets from file start; CRC covers header through HNSW</td></tr>
     </tbody>
   </table>
   <p><strong>Acceptance:</strong> round-trip property tests pass (write → read → decode within quantization error); the reader returns <code>Err(Corrupt)</code>, never panics or UB, on the provided corpus of 200 mutated files; brute-force search over decoded i8 codes achieves recall@10 ≥ 0.95 against f32 brute force on the 100k-vector sample set.</p>
@@ -162,8 +165,8 @@ pub fn merge_graphs(srcs: &amp;[&amp;VectorSegment], live: &amp;RowIdFilter,
 <section class="block">
   <div class="sec-label">Milestone 2</div>
   <h2>Per-Level HNSW: Build and Search</h2>
-  <p>Implement HNSW (Malkov &amp; Yashunin, 2018 — assigned in Week 2) from scratch. Construction runs at flush and at the end of compaction, over the quantized codes; expose <code>HnswParams { m: usize, ef_construction: usize }</code> and serialize the result into the segment’s HNSW section as per-layer CSR adjacency (Fig. 1). Distances during build and search are computed directly on i8 codes using the segment’s scale/bias — do not decode whole vectors to f32 buffers.</p>
-  <p><code>Db::search</code> must consult every live source: brute-force over the memtable, then beam search (width <code>ef</code>) in each level’s segment graphs, merging candidates in a single global heap. A candidate whose <code>RowId</code> is shadowed by a newer version or a tombstone above it must be filtered <em>before</em> it can occupy one of the k result slots. Optionally re-rank the final <code>4k</code> candidates with f32 vectors fetched from the value log — keep this behind a flag; it is one of your ablations.</p>
+  <p>Implement HNSW (Malkov &amp; Yashunin, 2018 — assigned in Week 2) from scratch. Construction runs at flush and at the end of compaction, over the quantized codes; drive it from the provided <code>HnswParams { m, ef_construction, ef_search }</code> and serialize the result into the segment’s HNSW section as per-layer CSR adjacency (Fig. 1). Distances during build and search are computed directly on i8 codes using the segment’s scale/bias — do not decode whole vectors to f32 buffers.</p>
+  <p><code>Db::knn</code> must consult every live source: brute-force over the memtable, then beam search (width <code>ef</code>) in each level’s segment graphs, merging candidates in a single global heap. A candidate whose <code>DocId</code> is shadowed by a newer version or a tombstone above it must be filtered <em>before</em> it can occupy one of the k result slots. Optionally re-rank the final <code>4k</code> candidates with f32 vectors — keep this behind a flag; it is one of your ablations.</p>
   <p><strong>Acceptance:</strong> on a 1M-vector single-segment fixture with <code>m = 16</code>, <code>ef = 64</code>: recall@10 ≥ 0.90 with mean query latency ≤ 2&nbsp;ms on the grading machine (8 cores, AVX2); construction ≤ 8 minutes; the serialized graph reloads byte-identically.</p>
 </section>
 
@@ -183,7 +186,7 @@ pub fn merge_graphs(srcs: &amp;[&amp;VectorSegment], live: &amp;RowIdFilter,
 <section class="block">
   <div class="sec-label">Milestone 4</div>
   <h2>Benchmark Harness and Pareto Report</h2>
-  <p><code>agentgen</code> emits a 2-hour synthetic agent trace: bursty sessions that interleave upserts (tool results, ~30% of ops), point gets (~20%), and vector searches (~50%) with Zipfian session skew and 5% deletes. Build a harness that replays it at a fixed arrival rate while sampling four axes: <strong>search latency p99</strong>, <strong>sustained update throughput</strong>, <strong>resident memory</strong> (RSS, plus your own accounting of graph bytes), and <strong>recall@10</strong> (sampled: every 50th search is also answered by the brute-force oracle).</p>
+  <p>The provided generator (<code>workload.rs</code>) emits a synthetic agent trace: sessions that interleave upserts (tool results, ~20% of ops), range scans (~10%), and vector searches (~70%) with Zipfian skew over both keys and query templates. Build a harness that replays it at a fixed arrival rate while sampling four axes: <strong>search latency p99</strong>, <strong>sustained update throughput</strong>, <strong>resident memory</strong> (RSS, plus your own accounting of graph bytes), and <strong>recall@10</strong> (sampled: every 50th search is also answered by the brute-force oracle).</p>
   <p>Sweep at least three knobs — <code>m ∈ {8, 16, 32}</code>, <code>ef ∈ {16, 64, 256}</code>, and re-ranking on/off at minimum; codec and level fan-out are encouraged — and plot the Pareto frontier in the recall–latency plane with memory encoded as mark size, plus one ablation table isolating each knob’s marginal effect with the others held at defaults. The report (≤ 6 pages, PDF) must state the hardware, the seed, and the exact commit; every figure must be regenerable by <code>make report</code>.</p>
 </section>
 
@@ -196,7 +199,7 @@ pub fn merge_graphs(srcs: &amp;[&amp;VectorSegment], live: &amp;RowIdFilter,
       <tr><td><strong>Correctness</strong></td><td>40</td><td>Milestone acceptance tests (10 each): format round-trip and corruption handling; HNSW recall/latency floor; merge-vs-rebuild recall gap and CPU ratio; harness oracle agreement. Tests run on our machine, fresh clone, <code>cargo test --features grading</code>.</td></tr>
       <tr><td><strong>Performance frontier</strong></td><td>30</td><td>Your frontier’s dominance region against the class. Full credit requires a frontier — at least 6 non-dominated configurations — not a single tuned point. A fast system with recall 0.6 and a slow one with recall 0.99 both earn less than a genuine trade-off curve.</td></tr>
       <tr><td><strong>Report</strong></td><td>20</td><td>Pareto plot correctness, ablation table, honest negative results, reproducibility (<code>make report</code> works). Claims must cite your own measurements.</td></tr>
-      <tr><td><strong>Code quality</strong></td><td>10</td><td>No <code>unsafe</code> outside <code>vseg.rs</code> reader casts (each with a safety comment); no panics on user input; clippy-clean; the format documented in <code>FORMAT.md</code> well enough for a stranger to write an independent reader.</td></tr>
+      <tr><td><strong>Code quality</strong></td><td>10</td><td>No <code>unsafe</code> outside the <code>SstReader</code> cast paths (each with a safety comment); no panics on user input; clippy-clean; the format documented in <code>FORMAT.md</code> well enough for a stranger to write an independent reader.</td></tr>
     </tbody>
   </table>
   <p>Late policy: 10% per day, 3 days maximum. One milestone may be designated “best effort” in your report for a 5-point cap reduction instead of failing its tests silently — honesty is cheaper than hope.</p>
