@@ -23,7 +23,7 @@
   <div class="kicker">Lab 3 · Weeks 9–10</div>
   <h1>Text-to-SQL Agent + Eval <em>Harness</em></h1>
   <p class="standfirst">You will build an analytics agent over a deliberately hostile 126-table enterprise schema — and, more importantly, the evaluation harness that tells you whether it actually works. The agent is half the lab; the measurement is the other half.</p>
-  <div class="meta"><b>Due:</b> Fri Week 10, 23:59 · <b>Weight:</b> 20% of course grade · <b>Teams:</b> pairs &nbsp;·&nbsp; <b>Submit:</b> Git tag <code>lab3-final</code> + <code>report/ablation.md</code></div>
+  <div class="meta"><b>Due:</b> Fri Week 10, 23:59 · <b>Weight:</b> 10% of course grade (¼ of the 40% lab component) · <b>Teams:</b> pairs &nbsp;·&nbsp; <b>Submit:</b> Git tag <code>lab3-final</code> + <code>report/ablation.md</code></div>
 </header>
 
 <main>
@@ -267,6 +267,7 @@ cubes:
     <div class="read-row"><div class="n">→</div><div class="t"><a href="materials/lab3/schema.sql">schema.sql</a><span class="v">Full warehouse DDL — 126 tables across finance, sales, orders, returns, marketing, web, hr, ops plus a deprecated graveyard; instructor edition with -- TRAP annotations (stripped from the student build)</span></div></div>
     <div class="read-row"><div class="n">→</div><div class="t"><a href="materials/lab3/questions.jsonl">questions.jsonl</a><span class="v">50 BIRD-style eval questions with gold SQL (DuckDB dialect) and expected result shape; 12+ deliberately hit the salted traps</span></div></div>
     <div class="read-row"><div class="n">→</div><div class="t"><a href="materials/lab3/semantic_layer.yaml">semantic_layer.yaml</a><span class="v">Instructor reference semantic layer in the Cube-style format the autograder parses — governed revenue, active-user, return-rate, and AOV definitions with anti-patterns and a deprecated-table list</span></div></div>
+    <div class="read-row"><div class="n">→</div><div class="t"><a href="materials/lab3/grader/grade.py">grader/grade.py</a><span class="v">Execution-accuracy grader stub — loads the schema into DuckDB, grades an answers JSONL against the gold queries (PASS / WRONG_RESULT / BINDER_ERROR / STALE_TABLE), with four example test cases via --self-test</span></div></div>
     <div class="read-row"><div class="n">→</div><div class="t"><a href="materials/lab3/README.md">README.md</a><span class="v">Loading the DDL into DuckDB/Postgres, how the grader pins the snapshot by SHA-256, and the exact ablation-table format for report/ablation.md</span></div></div>
   </div>
 </section>

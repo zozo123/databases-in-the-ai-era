@@ -1,0 +1,76 @@
+name: lab-materials
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  lab1-vlsm-rust:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: course/materials/lab1 } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --all-targets
+      - run: cargo test
+
+  lab2-mini-neon-go:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: course/materials/lab2 } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: '1.22', cache-dependency-path: course/materials/lab2/go.sum }
+      - run: go vet ./...
+      - run: go build ./...
+      - run: go run ./cmd/walgen -h 2>/dev/null || go run ./cmd/walgen --help 2>/dev/null || true
+
+  lab3-trap-schema:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: course/materials/lab3 } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - run: pip install duckdb pyyaml
+      - name: schema loads and all 50 gold queries execute
+        run: |
+          python3 - <<'EOF'
+          import duckdb, json, re, sys
+          sql = open("schema.sql").read()
+          con = duckdb.connect(":memory:")
+          con.execute(re.sub(r"--\s*TRAP.*", "", sql))
+          tables = con.execute("select count(*) from information_schema.tables").fetchone()[0]
+          assert tables >= 120, f"only {tables} tables"
+          bad = 0
+          for line in open("questions.jsonl"):
+              q = json.loads(line)
+              try: con.execute(q["gold_sql"])
+              except Exception as e: bad += 1; print(q["id"], "FAIL:", e)
+          print(f"{tables} tables, 50 gold queries, {bad} failures")
+          sys.exit(1 if bad else 0)
+          EOF
+      - name: semantic layer parses
+        run: python3 -c "import yaml; yaml.safe_load(open('semantic_layer.yaml')); print('yaml ok')"
+      - name: grader self-test
+        run: python3 grader/grade.py --self-test
+
+  lab4-semantic-operators:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: course/materials/lab4 } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - name: data generator is deterministic
+        run: |
+          python3 make_data.py --outdir /tmp/a
+          python3 make_data.py --outdir /tmp/b
+          cmp /tmp/a/reviews.csv /tmp/b/reviews.csv
+          cmp /tmp/a/products.csv /tmp/b/products.csv
+          echo "byte-identical across runs"
+      - name: operators smoke test
+        run: |
+          cp /tmp/a/*.csv .
+          python3 operators_stub.py

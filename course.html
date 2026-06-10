@@ -342,7 +342,7 @@
 
     <div class="week">
       <div class="wn"><span>Week</span>02</div>
-      <div><h4>Storage Engines &amp; the RUM Triangle</h4><div class="frame">B-trees and LSM-trees as the two stable attractors of fifty years of storage design. Do agent workloads — write-heavy memory accumulation plus read-heavy semantic recall — sit at a RUM corner nobody optimized for?</div></div>
+      <div><h4>B-Trees, LSM-Trees &amp; the RUM Triangle</h4><div class="frame">B-trees and LSM-trees as the two stable attractors of fifty years of storage design. Do agent workloads — write-heavy memory accumulation plus read-heavy semantic recall — sit at a RUM corner nobody optimized for?</div></div>
       <div class="reads"><b>Readings</b><i>Database Internals</i> — Petrov, 2019, ch. 2–4 &amp; 7<br><i>The RUM Conjecture</i> — Athanassoulis et al., EDBT 2016<br><i>The Log-Structured Merge-Tree</i> — O’Neil et al., 1996</div>
     </div>
 
@@ -450,12 +450,12 @@
       <div class="lab">
         <div class="ln">Lab 3 · Weeks 9–10</div>
         <h4>Text-to-SQL agent + eval harness</h4>
-        <p>Build an agent over a 200-table enterprise-style schema; construct a BIRD-style eval set; then add a Cube-style semantic layer and report execution accuracy with and without it, broken down by error class: wrong join, wrong metric, hallucinated column. Reproduce the 21%→95% curve yourself.</p>
+        <p>Build an agent over a 126-table enterprise-style schema; construct a BIRD-style eval set; then add a Cube-style semantic layer and report execution accuracy with and without it, broken down by error class: wrong join, wrong metric, hallucinated column. Reproduce the 21%→95% curve yourself.</p>
       </div>
       <div class="lab">
         <div class="ln">Lab 4 · Weeks 10–12</div>
         <h4>A semantic-operator optimizer</h4>
-        <p>Implement <code>sem_filter</code>, <code>sem_join</code>, <code>sem_topk</code> over a Parquet corpus with a cost model spanning model tiers, cascades with cheap-proxy scoring, and an accuracy budget. Beat the naive plan by 10× on cost at ≤2% quality loss.</p>
+        <p>Implement <code>sem_filter</code>, <code>sem_join</code>, <code>sem_topk</code> over a 25,000-document corpus with a cost model spanning model tiers, cascades with cheap-proxy scoring, and an accuracy budget. Beat the naive plan by 10× on cost at ≤2% quality loss.</p>
       </div>
     </div>
   </div>
