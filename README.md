@@ -1,6 +1,8 @@
 # Databases in the Age of AI
 
-Two essays and a complete, free graduate database course for the agentic era.
+[![lab-materials CI](https://github.com/zozo123/databases-in-the-ai-era/actions/workflows/labs.yml/badge.svg)](https://github.com/zozo123/databases-in-the-ai-era/actions/workflows/labs.yml)
+
+Two essays and a complete, free graduate database course for the agentic era. All four labs' starter materials are CI-tested on every push (cargo test, go vet/build, DuckDB schema + 50 gold queries + grader self-test, deterministic data-gen + operator smoke test).
 
 **Start here:** https://zozo123.github.io/databases-in-the-ai-era/
 
