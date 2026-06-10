@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DATA 2027: Data Systems in the Agentic Era — The Syllabus</title>
+<meta name="description" content="A graduate course that doesn't exist yet — but should. The lovechild of MIT 6.5830, Harvard CS265, CMU 15-721 and Stanford CS245, rebuilt for a world where AI agents are the dominant database clients. With field notes on what the real 2026 courses actually teach.">
+<meta property="og:title" content="DATA 2027: Data Systems in the Agentic Era">
+<meta property="og:description" content="The 2027 syllabus: 14 weeks, 4 labs, 8 final projects, 5 exam questions — for the workload regime change nobody's flagship course teaches yet.">
+<meta property="og:type" content="article">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500;9..144,600;9..144,900&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400;1,6..72,500&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: #f6f1e7;
+    --paper-deep: #efe8d8;
+    --ink: #1d1a15;
+    --ink-soft: #4a443a;
+    --ink-faint: #837b6c;
+    --ox: #93321b;
+    --ox-bright: #b8401f;
+    --rule: #d8cfba;
+    --mono: 'IBM Plex Mono', ui-monospace, monospace;
+    --serif: 'Newsreader', Georgia, serif;
+    --display: 'Fraunces', Georgia, serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--serif);
+    font-size: 20px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+    background-image: radial-gradient(ellipse at 80% -10%, rgba(184,64,31,.045), transparent 55%);
+  }
+  ::selection { background: var(--ox); color: var(--paper); }
+  #progress { position: fixed; top: 0; left: 0; height: 3px; width: 0%; background: var(--ox); z-index: 99; }
+
+  .masthead {
+    max-width: 1100px; margin: 0 auto; padding: 28px 24px 0;
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-family: var(--mono); font-size: 12px; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--ink-faint);
+  }
+  .masthead .dot { color: var(--ox); }
+  .masthead a { color: var(--ink-faint); text-decoration: none; }
+  .masthead a:hover { color: var(--ox-bright); }
+
+  .hero { max-width: 1100px; margin: 0 auto; padding: 9vh 24px 7vh; border-bottom: 1px solid var(--ink); }
+  .hero .kicker {
+    font-family: var(--mono); font-size: 13px; letter-spacing: .22em;
+    text-transform: uppercase; color: var(--ox);
+    margin-bottom: 34px; display: flex; align-items: center; gap: 14px;
+  }
+  .hero .kicker::after { content:""; height:1px; flex:1; background: var(--rule); }
+  h1 {
+    font-family: var(--display); font-optical-sizing: auto; font-weight: 900;
+    font-size: clamp(50px, 8.6vw, 122px); line-height: .94; letter-spacing: -.022em; text-wrap: balance;
+  }
+  h1 em { font-style: italic; font-weight: 300; color: var(--ox); }
+  .hero .standfirst { margin-top: 44px; display: grid; grid-template-columns: minmax(0,1.5fr) minmax(0,1fr); gap: 48px; align-items: end; }
+  .standfirst p { font-size: clamp(20px, 2.2vw, 26px); line-height: 1.45; font-weight: 500; text-wrap: balance; }
+  .standfirst .meta { font-family: var(--mono); font-size: 12.5px; line-height: 2.1; color: var(--ink-soft); text-align: right; }
+  .standfirst .meta b { color: var(--ink); font-weight: 600; }
+  @media (max-width: 760px) { .hero .standfirst { grid-template-columns: 1fr; } .standfirst .meta { text-align: left; } }
+
+  nav.toc {
+    max-width: 1100px; margin: 0 auto; padding: 30px 24px; border-bottom: 1px solid var(--rule);
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 6px 36px;
+  }
+  nav.toc a {
+    font-family: var(--mono); font-size: 13px; color: var(--ink-soft); text-decoration: none;
+    padding: 7px 0; display: flex; gap: 12px; transition: color .15s;
+  }
+  nav.toc a:hover { color: var(--ox-bright); }
+  nav.toc a .n { color: var(--ox); min-width: 2.2em; }
+
+  article { max-width: 1100px; margin: 0 auto; padding: 0 24px; }
+  section.chapter { padding: 84px 0 30px; }
+  .ch-head { margin-bottom: 48px; }
+  .ch-num {
+    font-family: var(--mono); font-size: 13px; letter-spacing: .2em; color: var(--ox);
+    text-transform: uppercase; display: flex; align-items: center; gap: 16px; margin-bottom: 18px;
+  }
+  .ch-num::after { content: ""; flex: 1; height: 1px; background: var(--rule); }
+  h2 {
+    font-family: var(--display); font-weight: 600; font-size: clamp(34px, 4.6vw, 58px);
+    line-height: 1.04; letter-spacing: -.015em; text-wrap: balance; max-width: 18ch;
+  }
+  .ch-body { display: grid; grid-template-columns: minmax(0, 62ch) minmax(180px, 1fr); gap: 0 64px; }
+  .ch-body > * { grid-column: 1; }
+  .ch-body p { margin-bottom: 1.45em; }
+  @media (max-width: 900px) { .ch-body { grid-template-columns: 1fr; } }
+  p.opener::first-letter {
+    font-family: var(--display); font-weight: 900; color: var(--ox);
+    font-size: 4.4em; line-height: .78; float: left; padding: .07em .12em 0 0;
+  }
+  .note {
+    grid-column: 2; align-self: start; font-family: var(--mono); font-size: 12px; line-height: 1.75;
+    color: var(--ink-faint); border-top: 1px solid var(--rule); padding-top: 10px; margin-bottom: 28px;
+  }
+  .note a { color: var(--ox); text-decoration: none; border-bottom: 1px dotted var(--ox); }
+  @media (max-width: 900px) { .note { grid-column: 1; max-width: 62ch; border-left: 2px solid var(--ox); border-top: none; padding: 2px 0 2px 14px; } }
+  .pull {
+    grid-column: 1 / -1; font-family: var(--display); font-weight: 300; font-style: italic;
+    font-size: clamp(28px, 3.6vw, 44px); line-height: 1.18; margin: 56px 0; padding-left: 28px;
+    border-left: 3px solid var(--ox); text-wrap: balance; max-width: 28ch;
+  }
+  .pull b { font-weight: 600; font-style: normal; color: var(--ox); }
+  .ch-body a { color: inherit; text-decoration: none; border-bottom: 1px solid rgba(147,50,27,.45); transition: color .15s; }
+  .ch-body a:hover { color: var(--ox-bright); }
+  code { font-family: var(--mono); font-size: .82em; background: var(--paper-deep); padding: 2px 6px; border-radius: 3px; border: 1px solid var(--rule); }
+  blockquote.verbatim {
+    margin: 40px 0; padding: 26px 30px; background: var(--paper-deep);
+    border: 1px solid var(--rule); font-size: 19px; line-height: 1.6;
+  }
+  blockquote.verbatim cite { display: block; font-family: var(--mono); font-style: normal; font-size: 12px; color: var(--ink-faint); margin-top: 14px; }
+
+  /* field-notes school grid */
+  .schools { grid-column: 1 / -1; margin: 44px 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(310px, 1fr)); gap: 0; border: 1px solid var(--ink); background: var(--paper-deep); }
+  .school { padding: 26px 26px 24px; border-right: 1px solid var(--rule); border-bottom: 1px solid var(--rule); }
+  .school h4 { font-family: var(--display); font-weight: 600; font-size: 22px; margin-bottom: 4px; }
+  .school .course { font-family: var(--mono); font-size: 11.5px; color: var(--ox); letter-spacing: .06em; margin-bottom: 12px; }
+  .school p { font-size: 16px; line-height: 1.6; color: var(--ink-soft); margin: 0; }
+
+  /* course spec sheet */
+  .spec-sheet { grid-column: 1 / -1; margin: 44px 0; border: 2px solid var(--ink); background: var(--paper-deep); }
+  .spec-sheet .title-row { padding: 34px 34px 26px; border-bottom: 1px solid var(--ink); }
+  .spec-sheet .cnum { font-family: var(--mono); font-size: 13px; letter-spacing: .18em; color: var(--ox); text-transform: uppercase; margin-bottom: 10px; }
+  .spec-sheet h3 { font-family: var(--display); font-weight: 900; font-size: clamp(30px, 4vw, 46px); line-height: 1.02; letter-spacing: -.015em; }
+  .spec-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+  .spec { padding: 20px 34px; border-right: 1px solid var(--rule); border-top: 1px solid var(--rule); }
+  .spec .k { font-family: var(--mono); font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--ink-faint); margin-bottom: 6px; }
+  .spec .v { font-size: 16.5px; line-height: 1.5; }
+  .spec-sheet .desc { padding: 26px 34px 30px; border-top: 1px solid var(--ink); font-size: 18px; line-height: 1.65; }
+  .spec-sheet .desc b { color: var(--ox); }
+
+  /* weeks */
+  .part-label {
+    grid-column: 1 / -1; font-family: var(--mono); font-size: 12px; letter-spacing: .2em;
+    text-transform: uppercase; color: var(--paper); background: var(--ink);
+    padding: 12px 18px; margin: 52px 0 0;
+  }
+  .week { grid-column: 1 / -1; display: grid; grid-template-columns: 92px minmax(0, 1.35fr) minmax(0, 1fr); gap: 24px 36px; padding: 28px 4px; border-bottom: 1px solid var(--rule); }
+  .week .wn { font-family: var(--display); font-weight: 900; font-size: 38px; color: var(--ox); line-height: 1; }
+  .week .wn span { display: block; font-family: var(--mono); font-weight: 400; font-size: 10px; letter-spacing: .16em; color: var(--ink-faint); margin-bottom: 6px; text-transform: uppercase; }
+  .week h4 { font-family: var(--display); font-weight: 600; font-size: 23px; line-height: 1.15; margin-bottom: 8px; }
+  .week .frame { font-size: 16.5px; line-height: 1.6; color: var(--ink-soft); }
+  .week .reads { font-family: var(--mono); font-size: 12px; line-height: 1.8; color: var(--ink-soft); border-left: 2px solid var(--rule); padding-left: 16px; align-self: start; }
+  .week .reads b { display: block; font-size: 10px; letter-spacing: .16em; text-transform: uppercase; color: var(--ox); margin-bottom: 6px; }
+  .week .reads i { font-style: normal; color: var(--ink); }
+  @media (max-width: 860px) { .week { grid-template-columns: 64px 1fr; } .week .reads { grid-column: 2; } }
+
+  /* labs */
+  .labs { grid-column: 1 / -1; margin: 44px 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 18px; }
+  .lab { border: 1px solid var(--ink); background: var(--paper-deep); padding: 24px 24px 22px; }
+  .lab .ln { font-family: var(--mono); font-size: 11px; letter-spacing: .16em; text-transform: uppercase; color: var(--ox); margin-bottom: 10px; }
+  .lab h4 { font-family: var(--display); font-weight: 600; font-size: 21px; margin-bottom: 8px; }
+  .lab p { font-size: 15.5px; line-height: 1.6; color: var(--ink-soft); margin: 0; }
+  .lab code { font-size: .85em; }
+
+  /* ledger (projects + exam) */
+  .ledger { grid-column: 1 / -1; margin: 44px 0 8px; border-top: 2px solid var(--ink); }
+  .row { display: grid; grid-template-columns: 64px 1fr; gap: 24px; padding: 20px 4px; border-bottom: 1px solid var(--rule); align-items: baseline; }
+  .row .yr { font-family: var(--display); font-weight: 900; font-size: 26px; color: var(--ox); }
+  .row .txt { font-size: 18px; line-height: 1.55; }
+  .row .txt b { font-family: var(--display); font-weight: 600; }
+
+  /* grading bar */
+  .grade-bar { grid-column: 1 / -1; margin: 40px 0; }
+  .gb { display: flex; height: 64px; border: 1px solid var(--ink); font-family: var(--mono); }
+  .gb div { display: flex; flex-direction: column; justify-content: center; padding: 0 14px; font-size: 11px; letter-spacing: .04em; border-right: 1px solid var(--paper); overflow: hidden; white-space: nowrap; }
+  .gb div b { font-size: 18px; letter-spacing: 0; }
+  .gb .g1 { width: 40%; background: var(--ink); color: var(--paper); }
+  .gb .g2 { width: 35%; background: var(--ox); color: var(--paper); }
+  .gb .g3 { width: 15%; background: var(--ox-bright); color: var(--paper); }
+  .gb .g4 { width: 10%; background: var(--paper-deep); color: var(--ink); }
+
+  .ch-body ol.essay, .ch-body ul.essay { margin: 0 0 1.45em 1.3em; }
+  .ch-body li { margin-bottom: .7em; }
+  .ch-body li::marker { font-family: var(--mono); color: var(--ox); font-size: .85em; }
+
+  .sources { columns: 2; column-gap: 56px; font-family: var(--mono); font-size: 12.5px; line-height: 1.9; color: var(--ink-soft); grid-column: 1 / -1; }
+  .sources li { break-inside: avoid; margin-bottom: 10px; list-style: none; padding-left: 2.4em; text-indent: -2.4em; }
+  .sources .k { color: var(--ox); }
+  .sources a { color: inherit; text-decoration: none; border-bottom: 1px dotted var(--rule); }
+  .sources a:hover { color: var(--ox-bright); }
+  @media (max-width: 760px) { .sources { columns: 1; } }
+
+  .fleuron { text-align: center; font-family: var(--display); color: var(--ox); font-size: 22px; letter-spacing: 1.2em; padding: 26px 0 0 1.2em; grid-column: 1/-1; }
+
+  footer { border-top: 1px solid var(--ink); margin-top: 90px; background: var(--ink); color: var(--paper-deep); }
+  .colophon { max-width: 1100px; margin: 0 auto; padding: 56px 24px 64px; display: grid; grid-template-columns: 1.4fr 1fr; gap: 48px; }
+  .colophon h3 { font-family: var(--display); font-weight: 600; font-size: 26px; margin-bottom: 16px; color: var(--paper); }
+  .colophon p { font-size: 15.5px; line-height: 1.7; color: #b9b09c; margin-bottom: 1em; }
+  .colophon .specs { font-family: var(--mono); font-size: 12px; line-height: 2.2; color: #968d77; }
+  .colophon .specs b { color: var(--paper-deep); font-weight: 500; }
+  .colophon a { color: var(--paper); text-decoration: none; border-bottom: 1px dotted #6f6753; }
+  @media (max-width: 760px) { .colophon { grid-template-columns: 1fr; } }
+
+  .reveal { opacity: 0; transform: translateY(14px); transition: opacity .7s ease, transform .7s ease; }
+  .reveal.in { opacity: 1; transform: none; }
+  @media (prefers-reduced-motion: reduce) { .reveal { opacity: 1; transform: none; transition: none; } }
+</style>
+</head>
+<body>
+<div id="progress"></div>
+
+<div class="masthead">
+  <span>TMP&nbsp;PRESS <span class="dot">●</span> ESSAY № 02 — A SYLLABUS</span>
+  <span><a href="index.html">← № 01: THE ESSAY</a></span>
+</div>
+
+<header class="hero">
+  <div class="kicker">A Course That Doesn’t Exist Yet</div>
+  <h1>The 2027 <em>Syllabus</em></h1>
+  <div class="standfirst">
+    <p><b>DATA 2027: Data Systems in the Agentic Era.</b> The lovechild of MIT 6.5830, Harvard CS265, CMU 15-721 and Stanford CS245 — rebuilt for a world where the database’s dominant client is a model. Preceded by field notes on what the real flagship courses actually teach in 2026, and the gap they leave open.</p>
+    <div class="meta">
+      <b>cross-listed (hypothetically)</b><br>
+      MIT 6.5837 · Stanford CS 345A · Harvard CS 2650<br>
+      12 units · spring 2027 · 14 weeks<br>
+      4 labs · 8 final projects · 5 exam questions
+    </div>
+  </div>
+</header>
+
+<nav class="toc">
+  <a href="#field"><span class="n">0.</span> Field Notes, June 2026</a>
+  <a href="#course"><span class="n">§1</span> The Course</a>
+  <a href="#weeks"><span class="n">§2</span> Fourteen Weeks</a>
+  <a href="#labs"><span class="n">§3</span> The Labs</a>
+  <a href="#projects"><span class="n">§4</span> Final Projects &amp; Grading</a>
+  <a href="#exam"><span class="n">§5</span> The Exam</a>
+  <a href="#sources"><span class="n">§</span> Sources</a>
+</nav>
+
+<article>
+
+<!-- ============ FIELD NOTES ============ -->
+<section class="chapter reveal" id="field">
+  <div class="ch-head">
+    <div class="ch-num">Prologue</div>
+    <h2>Field Notes: What the Flagships Actually Teach</h2>
+  </div>
+  <div class="ch-body">
+    <p class="opener">Before inventing a course, survey the territory. We read the current syllabi of every flagship database course at Stanford, MIT, Harvard, CMU, and Berkeley — the actual 2025–2026 lecture schedules, not the catalog blurbs. The result is a snapshot of a discipline mid-pivot: the AI era has breached the core curriculum at exactly two schools, is knocking at a third, and has left the other two split between classical rigor and a vacated chair.</p>
+
+    <div class="schools">
+      <div class="school">
+        <h4>MIT</h4>
+        <div class="course">6.5830 · SPRING 2026 · CAFARELLA &amp; LI</div>
+        <p>The bellwether. The core grad DB course now ends its 24-lecture arc with <b>Lecture 17: Vector Databases</b> and <b>Lecture 22: Semantic Operators</b> — LLM-powered relational operators, taught from the group’s own Palimpzest (CIDR ’25), have entered the canon alongside ARIES and C-Store. Kraska is on leave running applied science at AWS, where SageDB’s learned layouts shipped inside Redshift.</p>
+      </div>
+      <div class="school">
+        <h4>Harvard</h4>
+        <div class="course">CS265 · SPRING 2026 · IDREOS</div>
+        <p>The boldest rename: CS265 is now literally <b>“Big Data &amp; AI Systems”</b> — NoSQL, LLMs, RAG, image AI. The systems project: build a full NoSQL engine <i>and</i> a full LLM, in C/C++. DASlab’s “self-designing systems” program (Data Calculator, Monkey, Dostoevsky) now treats RAG pipelines and LLM serving as data systems with navigable design spaces.</p>
+      </div>
+      <div class="school">
+        <h4>CMU</h4>
+        <div class="course">15-445/645 · SPRING 2026 · 15-721 · FALL 2025</div>
+        <p>Vector indexes are now in the <b>intro</b> indexing lectures of 15-445 — commoditized, as Pavlo predicted. But 15-721 (Advanced, now under Jignesh Patel) stays deliberately classical: vectorized execution, OCC, cloud warehouses, lakehouses. Pavlo’s 2025 year-in-review: every DBMS shipped an MCP server, agents provision the databases, and nobody has solved the security story.</p>
+      </div>
+      <div class="school">
+        <h4>Stanford</h4>
+        <div class="course">CS245 DORMANT · CS336/224V/224G ACTIVE</div>
+        <p>The famous data-intensive systems course is effectively frozen at its 2021 edition — Zaharia left for Berkeley and the Databricks CTO chair. The energy moved sideways: CS336 makes students build Common Crawl dedup pipelines (data engineering <i>as part of</i> the model), CS224V teaches SUQL’s hybrid SQL+retrieval queries, and the LOTUS semantic-operators work (VLDB ’25) came from the Zaharia–Guestrin orbit.</p>
+      </div>
+      <div class="school">
+        <h4>Berkeley</h4>
+        <div class="course">CS294 RDI MOOCS · EPIC LAB</div>
+        <p>No flagship grad DB course since 2020 — but the world’s largest agent courses (LLM Agents, Agentic AI; five-thousand-student MOOCs) and the EPIC lab’s DocETL (VLDB ’25), the third leg of the semantic-operator stool. Hellerstein’s Aqueduct pivoted to RunLLM; his verdict: enterprise picks-and-shovels LLM tooling “is not ready yet.”</p>
+      </div>
+      <div class="school">
+        <h4>The Gap</h4>
+        <div class="course">NOBODY TEACHES THE WHOLE STACK</div>
+        <p>Vector internals live at CMU, semantic operators at MIT, self-designing systems at Harvard, data curation at Stanford, agents at Berkeley. <b>No single course teaches the agentic data stack end-to-end</b> — storage physics to semantic layer to agent governance. That course is below.</p>
+      </div>
+    </div>
+
+    <p>One quote from the field survey deserves framing, because it is the entire reason the course below exists. Michael Stonebraker — Turing laureate, creator of Ingres and Postgres — ran text-to-SQL against MIT’s own data warehouse in 2025 and reported:</p>
+
+    <blockquote class="verbatim">
+      “An accuracy of zero — not low, <em>zero</em>.” Private data, idiosyncratic terminology, semantic overlap, complex queries. His corollary: agentic AI is about to go read-write, and what it needs is ACID — “durable computing is basically the D in ACID.”
+      <cite>— Michael Stonebraker, 2025 year-in-review interview; his DBOS project has pivoted to durable execution for “crashproof AI agents”</cite>
+    </blockquote>
+
+    <p>Zero on MIT’s warehouse; ninety-five percent at Anthropic with curated context. The entire pedagogy of the agentic era lives in the space between those two numbers — and no course on Earth currently teaches students how to cross it.</p>
+  </div>
+</section>
+
+<!-- ============ COURSE HEADER ============ -->
+<section class="chapter reveal" id="course">
+  <div class="ch-head">
+    <div class="ch-num">Section 1</div>
+    <h2>The Course</h2>
+  </div>
+  <div class="ch-body">
+
+    <div class="spec-sheet">
+      <div class="title-row">
+        <div class="cnum">MIT 6.5837 · Stanford CS 345A · Harvard CS 2650 — Spring 2027</div>
+        <h3>DATA 2027: Data Systems in the Agentic Era</h3>
+      </div>
+      <div class="spec-grid">
+        <div class="spec"><div class="k">Units / Pattern</div><div class="v">12 units (3-0-9) · Tu/Th 1:00–2:30 lecture · Fri 90-min systems lab</div></div>
+        <div class="spec"><div class="k">Prerequisites</div><div class="v">An undergrad DB internals course (6.5830, CS 245, CS 165); systems programming in Rust/C++/Go; fluency with LLM APIs. Comfort reading two papers a week unassisted.</div></div>
+        <div class="spec"><div class="k">Instructor archetype</div><div class="v">A database-internals veteran who shipped a commercial storage engine, took a two-year detour through an AI lab, and came back angry about both communities’ blind spots. Office hours run like CIDR hallway arguments.</div></div>
+        <div class="spec"><div class="k">Audience</div><div class="v">PhD students in data systems and ML systems; MEng students who want to build the next Snowflake or kill the current one; staff engineers on sabbatical.</div></div>
+      </div>
+      <div class="desc">
+        For fifty years, every database design decision — the buffer pool, the optimizer’s cost model, the isolation-level menu, SQL itself — quietly assumed a human at the other end of the connection: tens of queries per session, seconds of patience, intent behind every WHERE clause. That client is gone. The dominant client of the late 2020s issues thousands of speculative queries per task, branches and abandons entire database states, retrieves by similarity as often as by key, knows nothing about your schema except what fits in its context window, and lies confidently when the data model confuses it. <b>Thesis: this is not a feature request; it is a workload regime change on the scale of the OLTP→OLAP split, and it invalidates assumptions at every layer of the stack.</b> This course rebuilds database systems knowledge from storage engines upward, asking at each layer what survives, what bends, and what breaks when the client is a model.
+      </div>
+    </div>
+
+    <p>The arc follows the stack: Part I re-reads the classical canon as a set of workload bets about to be violated. Part II covers the new access methods and engine architectures. Part III climbs to where the accuracy actually lives — semantics, agents, governance. Part IV asks the field’s oldest question of its newest material.</p>
+  </div>
+</section>
+
+<!-- ============ WEEKS ============ -->
+<section class="chapter reveal" id="weeks">
+  <div class="ch-head">
+    <div class="ch-num">Section 2</div>
+    <h2>Fourteen Weeks</h2>
+  </div>
+  <div class="ch-body">
+
+    <div class="part-label">Part I — Foundations Under New Workloads</div>
+
+    <div class="week">
+      <div class="wn"><span>Week</span>01</div>
+      <div><h4>The Client Has Changed</h4><div class="frame">The classical architecture as baseline; the agentic workload as the perturbation — bursty, speculative, semantically addressed, schema-ignorant. The semester’s question: which of Hellerstein’s five components survive contact?</div></div>
+      <div class="reads"><b>Readings</b><i>Architecture of a Database System</i> — Hellerstein, Stonebraker &amp; Hamilton, FnT DB 2007 (§1–4)<br><i>What Goes Around Comes Around</i> — Stonebraker &amp; Hellerstein<br><i>How Anthropic Enables Self-Service Data Analytics with Claude</i> — Anthropic, June 2026</div>
+    </div>
+
+    <div class="week">
+      <div class="wn"><span>Week</span>02</div>
+      <div><h4>Storage Engines &amp; the RUM Triangle</h4><div class="frame">B-trees and LSM-trees as the two stable attractors of fifty years of storage design. Do agent workloads — write-heavy memory accumulation plus read-heavy semantic recall — sit at a RUM corner nobody optimized for?</div></div>
+      <div class="reads"><b>Readings</b><i>Database Internals</i> — Petrov, 2019, ch. 2–4 &amp; 7<br><i>The RUM Conjecture</i> — Athanassoulis et al., EDBT 2016<br><i>The Log-Structured Merge-Tree</i> — O’Neil et al., 1996</div>
+    </div>
+
+    <div class="week">
+      <div class="wn"><span>Week</span>03</div>
+      <div><h4>One Size Fits None</h4><div class="frame">Stonebraker’s 2005 polemic as method: identify the workload assumption baked into the engine, then violate it on purpose — exactly what agents do to row stores and vector stores alike.</div></div>
+      <div class="reads"><b>Readings</b><i>“One Size Fits All”: An Idea Whose Time Has Come and Gone</i> — Stonebraker &amp; Çetintemel, ICDE 2005<br><i>C-Store</i> — VLDB 2005<br><i>MonetDB/X100: Hyper-Pipelining Query Execution</i> — Boncz et al., CIDR 2005</div>
+    </div>
+
+    <div class="week">
+      <div class="wn"><span>Week</span>04</div>
+      <div><h4>Disaggregation &amp; Elasticity</h4><div class="frame">Separating compute from storage was the architectural move of the 2010s; it turns out to be the precondition for agentic workloads, whose demand curves look like seismographs.</div></div>
+      <div class="reads"><b>Readings</b><i>Amazon Aurora</i> — Verbitski et al., SIGMOD 2017<br><i>The Snowflake Elastic Data Warehouse</i> — Dageville et al., SIGMOD 2016<br><i>Building an Elastic Query Engine on Disaggregated Storage</i> — NSDI 2020</div>
+    </div>
+
+    <div class="part-label">Part II — New Access Methods &amp; Engines</div>
+
+    <div class="week">
+      <div class="wn"><span>Week</span>05</div>
+      <div><h4>Learned Components</h4><div class="frame">If indexes are models, what else is? The learned-index paper as provocation; Bao as the mature, deployable version — ML steering a classical optimizer rather than replacing it, a pattern that recurs all semester.</div></div>
+      <div class="reads"><b>Readings</b><i>The Case for Learned Index Structures</i> — Kraska et al., SIGMOD 2018<br><i>Bao: Making Learned Query Optimization Practical</i> — Marcus et al., SIGMOD 2021<br><i>SageDB</i> — CIDR 2019</div>
+    </div>
+
+    <div class="week">
+      <div class="wn"><span>Week</span>06</div>
+      <div><h4>Vector Indexes Are Access Methods, Not Products</h4><div class="frame">HNSW and DiskANN are this generation’s B-tree and LSM: one memory-resident graph, one SSD-resident graph, both approximate. Recall becomes a first-class resource alongside read, update, and memory cost — foreshadowing the exam.</div></div>
+      <div class="reads"><b>Readings</b><i>HNSW</i> — Malkov &amp; Yashunin, IEEE TPAMI 2018<br><i>DiskANN</i> — Subramanya et al., NeurIPS 2019<br><i>Product Quantization</i> — Jégou et al., TPAMI 2011</div>
+    </div>
+
+    <div class="week">
+      <div class="wn"><span>Week</span>07</div>
+      <div><h4>The Lakehouse &amp; Open Formats</h4><div class="frame">When every agent framework wants direct Parquet access, the table format becomes the database. Iceberg’s metadata tree, Photon’s vectorized execution over open files — the engine dissolving into the lake.</div></div>
+      <div class="reads"><b>Readings</b><i>Lakehouse</i> — Armbrust et al., CIDR 2021<br><i>Apache Iceberg Table Spec v2</i> + Ryan Blue, Netflix 2018<br><i>Photon</i> — Behm et al., SIGMOD 2022</div>
+    </div>
+
+    <div class="week">
+      <div class="wn"><span>Week</span>08</div>
+      <div><h4>Transactions &amp; Branching for Agent Swarms</h4><div class="frame">A thousand agents exploring hypotheticals need cheap forks, not just isolation levels. Calvin and Spanner as the deterministic-vs-clock poles; Neon’s copy-on-write storage as the third thing agents actually want: the database as a versioned, branchable object.</div></div>
+      <div class="reads"><b>Readings</b><i>Calvin</i> — Thomson et al., SIGMOD 2012<br><i>Spanner</i> — Corbett et al., OSDI 2012<br><i>Neon: Architecture Decisions</i> — neon.tech engineering, 2022–24</div>
+    </div>
+
+    <div class="part-label">Part III — Semantics, Agents, Governance</div>
+
+    <div class="week">
+      <div class="wn"><span>Week</span>09</div>
+      <div><h4>Text-to-SQL Is Not Solved; It’s Specified</h4><div class="frame">Spider 2.0 and BIRD show frontier models failing on real enterprise schemas — not from weak SQL skills but from missing semantics. The semantic layer re-emerges as the schema-for-models: metrics, joins, and meaning as a queryable contract.</div></div>
+      <div class="reads"><b>Readings</b><i>Spider 2.0</i> — Lei et al., ICLR 2025 (oral)<br><i>BIRD</i> — Li et al., NeurIPS 2023<br><i>Semantic Layer vs Text-to-SQL benchmarks</i> — Cube / dbt Labs, 2026</div>
+    </div>
+
+    <div class="week">
+      <div class="wn"><span>Week</span>10</div>
+      <div><h4>Semantic Operators</h4><div class="frame">What if <code>sem_filter</code> and <code>sem_join</code> were relational operators with cost models, not prompt spaghetti? LOTUS, Palimpzest, and DocETL converge from three directions: declarative LLM pipelines deserve an optimizer, and accuracy joins latency and cost in the objective.</div></div>
+      <div class="reads"><b>Readings</b><i>Semantic Operators (LOTUS)</i> — Patel et al., VLDB 2025<br><i>Palimpzest</i> — Liu et al., CIDR 2025<br><i>DocETL</i> — Shankar et al., VLDB 2025</div>
+    </div>
+
+    <div class="week">
+      <div class="wn"><span>Week</span>11</div>
+      <div><h4>Memory Is a Database Problem</h4><div class="frame">Agent memory systems are reinventing materialized views, temporal databases, and log compaction — with worse durability stories. We read Mem0 and Graphiti as database designs and grade them as such.</div></div>
+      <div class="reads"><b>Readings</b><i>Mem0</i> — Chhikara et al., arXiv 2504.19413<br><i>Zep/Graphiti: Temporal KG for Agent Memory</i> — Rasmussen et al., arXiv 2501.13956<br><i>MemGPT</i> — Packer et al., 2023</div>
+    </div>
+
+    <div class="week">
+      <div class="wn"><span>Week</span>12</div>
+      <div><h4>Protocols, Permissions &amp; the Lethal Trifecta</h4><div class="frame">MCP is becoming ODBC for agents — shipping with none of ODBC’s hard-won governance. Private data + untrusted content + exfiltration channels is the new SQL injection; we design row-level security for clients that can be prompt-injected.</div></div>
+      <div class="reads"><b>Readings</b><i>Model Context Protocol Specification</i> — 2024–26<br><i>The Lethal Trifecta</i> — Willison, 2025 (incl. the Supabase MCP exfiltration case)<br><i>OWASP Top 10 for LLM Applications</i> — 2025 rev.</div>
+    </div>
+
+    <div class="part-label">Part IV — Frontier &amp; Futures</div>
+
+    <div class="week">
+      <div class="wn"><span>Week</span>13</div>
+      <div><h4>Self-Driving, Self-Assembling, Self-Designing</h4><div class="frame">Pavlo’s self-driving DBMS agenda predates agentic AI but predicts it; Idreos’s self-designing systems generalize it. Now the tuner is a general agent — does the DBA survive, and does the optimizer? OtterTune’s death as the cautionary case study.</div></div>
+      <div class="reads"><b>Readings</b><i>Self-Driving Database Management Systems</i> — Pavlo et al., CIDR 2017<br><i>The Data Calculator</i> — Idreos et al., SIGMOD 2018<br><i>OtterTune postmortem</i> — 2024</div>
+    </div>
+
+    <div class="week">
+      <div class="wn"><span>Week</span>14</div>
+      <div><h4>What Goes Around</h4><div class="frame">Every data-model rebellion gets reabsorbed by the relational core — the field’s elders have run this argument for forty years and never lost. Final debate: are vectors, semantic operators, and agent memory the next XML, or the first genuine exception in fifty years?</div></div>
+      <div class="reads"><b>Readings</b><i>What Goes Around Comes Around… And Around</i> — Stonebraker &amp; Pavlo, SIGMOD Record 2024<br><i>The Seattle Report on Database Research</i> — Abadi et al., CACM 2022</div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ============ LABS ============ -->
+<section class="chapter reveal" id="labs">
+  <div class="ch-head">
+    <div class="ch-num">Section 3</div>
+    <h2>The Labs</h2>
+  </div>
+  <div class="ch-body">
+    <p>Four labs, each one a thesis in miniature. Graded on Pareto frontiers and ablation tables, not point estimates — the Anthropic discipline, enforced from problem set one.</p>
+
+    <div class="labs">
+      <div class="lab">
+        <div class="ln">Lab 1 · Weeks 2–4</div>
+        <h4>VLSM: an LSM-tree with vector segments</h4>
+        <p>Extend a skeleton LSM engine (Rust) so each SSTable carries a quantized vector segment with a per-level HNSW graph; implement compaction that merges graphs. Measure the read / update / memory / <b>recall</b> frontier under a synthetic agent workload. Deliverable: a Pareto plot, not a number.</p>
+      </div>
+      <div class="lab">
+        <div class="ln">Lab 2 · Weeks 5–8</div>
+        <h4>Mini-Neon: copy-on-write pages over S3</h4>
+        <p>Build a page layer over object storage: WAL ingestion, page materialization at any LSN, and <code>CREATE BRANCH</code> in O(metadata). Demonstrate 50 concurrent agent branches forked from one parent, with garbage collection of the abandoned ones.</p>
+      </div>
+      <div class="lab">
+        <div class="ln">Lab 3 · Weeks 9–10</div>
+        <h4>Text-to-SQL agent + eval harness</h4>
+        <p>Build an agent over a 200-table enterprise-style schema; construct a BIRD-style eval set; then add a Cube-style semantic layer and report execution accuracy with and without it, broken down by error class: wrong join, wrong metric, hallucinated column. Reproduce the 21%→95% curve yourself.</p>
+      </div>
+      <div class="lab">
+        <div class="ln">Lab 4 · Weeks 10–12</div>
+        <h4>A semantic-operator optimizer</h4>
+        <p>Implement <code>sem_filter</code>, <code>sem_join</code>, <code>sem_topk</code> over a Parquet corpus with a cost model spanning model tiers, cascades with cheap-proxy scoring, and an accuracy budget. Beat the naive plan by 10× on cost at ≤2% quality loss.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ PROJECTS + GRADING ============ -->
+<section class="chapter reveal" id="projects">
+  <div class="ch-head">
+    <div class="ch-num">Section 4</div>
+    <h2>Final Projects &amp; Grading</h2>
+  </div>
+  <div class="ch-body">
+    <p>Teams of two; deliverable is a CIDR-format paper plus a working artifact. The menu — each item is a publishable question wearing a project’s clothing:</p>
+
+    <div class="ledger">
+      <div class="row"><div class="yr">P1</div><div class="txt"><b>Recall-aware compaction.</b> An LSM compaction policy that co-optimizes graph quality and write amplification.</div></div>
+      <div class="row"><div class="yr">P2</div><div class="txt"><b>Transactional agent memory.</b> Mem0-class memory with snapshot isolation, time travel, and an audit log; benchmark against Graphiti.</div></div>
+      <div class="row"><div class="yr">P3</div><div class="txt"><b>An MCP gateway with provenance-based row security.</b> Policy enforcement that survives prompt injection. Then red-team it.</div></div>
+      <div class="row"><div class="yr">P4</div><div class="txt"><b>Speculative query execution.</b> Predict an agent’s next five queries from its trace and pre-execute them on branches.</div></div>
+      <div class="row"><div class="yr">P5</div><div class="txt"><b>A semantic-layer compiler.</b> From dbt/Cube definitions to model-optimized context, with token-budget-aware schema elision.</div></div>
+      <div class="row"><div class="yr">P6</div><div class="txt"><b>Bao-for-LOTUS.</b> Learned plan steering for semantic-operator pipelines using execution feedback.</div></div>
+      <div class="row"><div class="yr">P7</div><div class="txt"><b>Branch-native CI for data.</b> Iceberg snapshots + agent-generated data tests as a “pull request for tables” system.</div></div>
+      <div class="row"><div class="yr">P8</div><div class="txt"><b>The agent-native TPC.</b> Design and publish a benchmark — workload generator plus metrics — for agentic database clients. The field needs this more than it needs another engine.</div></div>
+    </div>
+
+    <div class="grade-bar">
+      <div class="gb">
+        <div class="g1"><b>40%</b>labs</div>
+        <div class="g2"><b>35%</b>final project</div>
+        <div class="g3"><b>15%</b>paper responses + debate</div>
+        <div class="g4"><b>10%</b>exam</div>
+      </div>
+    </div>
+
+    <div class="pull">Database courses teach the system; ML courses teach the model. <b>Nobody teaches the interface</b> — which is where the next decade of both fields will be decided.</div>
+
+    <p>Why this course exists: the agent era is producing a generation of engineers who treat the database as a vibes-based retrieval API, and a generation of database researchers who treat LLMs as a noisy UDF. Both are wrong, and the cost of being wrong is measured in hallucinated joins shipped to production and in storage engines optimized for clients that no longer exist. This course exists to produce people who can hold Petrov’s page layouts and a transformer’s context window in their head at the same time — because the systems that win the agentic era will be built by exactly those people, and there are currently about two hundred of them on Earth.</p>
+  </div>
+</section>
+
+<!-- ============ EXAM ============ -->
+<section class="chapter reveal" id="exam">
+  <div class="ch-head">
+    <div class="ch-num">Section 5</div>
+    <h2>The Synthesis Exam</h2>
+  </div>
+  <div class="ch-body">
+    <p>Take-home, open-everything — including frontier models, because pretending otherwise teaches the wrong lesson. Each question requires holding two layers of the stack in tension; none can be answered from one community’s literature alone.</p>
+
+    <div class="ledger">
+      <div class="row"><div class="yr">Q1</div><div class="txt"><b>RUM-R.</b> The RUM conjecture says you optimize two of read, update, and memory at the expense of the third. Formalize a fourth axis — recall — for approximate access methods: define the trade-off space, prove or refute a four-way impossibility analogous to the original conjecture, and place HNSW, DiskANN, and your Lab 1 engine in it.</div></div>
+      <div class="row"><div class="yr">Q2</div><div class="txt"><b>Aurora for agents.</b> Aurora’s claim is “the log is the database.” Neon’s is “the log is the database, and the database is a tree of branches.” Derive the write-amplification and storage-cost consequences of 10,000 speculative agent branches per hour under each architecture, and identify the workload crossover point.</div></div>
+      <div class="row"><div class="yr">Q3</div><div class="txt"><b>Stonebraker’s wager.</b> Using the argumentative structure of <i>What Goes Around Comes Around… And Around</i> (2024), write the 2034 sequel’s section on semantic operators: argue either that LOTUS-style operators get absorbed into SQL (cite the precedent) or that the accuracy/cost dimension makes them the first true escape from the relational gravity well.</div></div>
+      <div class="row"><div class="yr">Q4</div><div class="txt"><b>The optimizer’s new objective.</b> Classical optimizers minimize cost for a fixed-correctness answer; semantic-operator optimizers trade cost against accuracy. Show formally why System R’s dynamic programming breaks under a (cost, accuracy) partial order, and propose a plan-enumeration strategy that doesn’t.</div></div>
+      <div class="row"><div class="yr">Q5</div><div class="txt"><b>Isolation for liars.</b> Two agents under read-committed each read a table, summarize it into their memory stores, and act on stale summaries — a <i>semantic phantom</i>. Define an isolation level for derived-belief consistency, specify its versioning protocol, and argue whether it belongs in the DBMS, the memory layer, or the protocol.</div></div>
+    </div>
+
+    <div class="fleuron">❦</div>
+  </div>
+</section>
+
+<!-- ============ SOURCES ============ -->
+<section class="chapter reveal" id="sources">
+  <div class="ch-head">
+    <div class="ch-num">Appendix</div>
+    <h2>Sources &amp; Provenance</h2>
+  </div>
+  <div class="ch-body">
+    <ul class="sources" style="grid-column: 1 / -1;">
+      <li><span class="k">[01]</span> MIT 6.5830 Spring 2026 — <a href="https://dsg.csail.mit.edu/6.5830/">course site</a>, <a href="https://dsg.csail.mit.edu/6.5830/sched.php">lecture schedule</a> (Lec 17 Vector DB, Lec 22 Semantic Operators); instructors Cafarella &amp; Li.</li>
+      <li><span class="k">[02]</span> Harvard CS265 “Big Data &amp; AI Systems,” Spring 2026, Idreos — <a href="http://daslab.seas.harvard.edu/classes/cs265/">site</a>, <a href="http://daslab.seas.harvard.edu/classes/cs265/files/syllabus.pdf">syllabus</a>; CS165 Fall 2025 — <a href="http://daslab.seas.harvard.edu/classes/cs165/">site</a>.</li>
+      <li><span class="k">[03]</span> CMU 15-445/645 Spring 2026 — <a href="https://15445.courses.cs.cmu.edu/spring2026/syllabus.html">syllabus</a> (vector indexes in intro indexing); 15-721 Fall 2025 (Patel) — <a href="https://www.cs.cmu.edu/~15721-f25/">site</a>.</li>
+      <li><span class="k">[04]</span> Pavlo, <a href="https://www.cs.cmu.edu/~pavlo/blog/2026/01/2025-databases-retrospective.html">“Databases in 2025: A Year in Review”</a> (MCP everywhere; agentic provisioning; security warning).</li>
+      <li><span class="k">[05]</span> Stanford: CS245 (frozen at <a href="https://web.stanford.edu/class/cs245/">Winter 2021</a>); <a href="https://cs336.stanford.edu/">CS336</a> (Common Crawl data labs); <a href="https://web.stanford.edu/class/cs224v/">CS224V</a> (SUQL); <a href="https://web.stanford.edu/class/cs224g/schedule.html">CS224G</a>; <a href="https://mlsys.stanford.edu/cs528/">CS528 MLSys seminar</a>.</li>
+      <li><span class="k">[06]</span> Berkeley: RDI agent courses — <a href="https://rdi.berkeley.edu/llm-agents/f24">LLM Agents F24</a>, <a href="https://rdi.berkeley.edu/agentic-ai/f25">Agentic AI F25</a>; EPIC lab <a href="https://arxiv.org/abs/2410.12189">DocETL, VLDB 2025</a>; Hellerstein on LLM tooling, <a href="https://www.firebolt.io/blog/professors-joe-hellerstein-and-joseph-gonzalez-on-llms">Firebolt interview</a>.</li>
+      <li><span class="k">[07]</span> Stonebraker “accuracy of zero” + ACID-for-agents: <a href="https://vonng.com/en/db/db-year-review-2025/">2025 year-in-review interview</a>; <a href="https://www.dbos.dev/">DBOS durable execution</a>.</li>
+      <li><span class="k">[08]</span> Semantic operators: LOTUS — Patel et al., <a href="https://www.vldb.org/pvldb/vol18/p4171-patel.pdf">VLDB 2025</a>; Palimpzest — Liu et al., <a href="https://vldb.org/cidrdb/papers/2025/p12-liu.pdf">CIDR 2025</a>; <a href="https://dsg.csail.mit.edu/projects/palimpzest/">MIT DSG project page</a>.</li>
+      <li><span class="k">[09]</span> Benchmarks: Spider 2.0 — <a href="https://arxiv.org/abs/2411.07763">ICLR 2025 oral</a>; BIRD — NeurIPS 2023, arXiv 2305.03111.</li>
+      <li><span class="k">[10]</span> Learned components: Kraska et al. SIGMOD 2018; Bao — Marcus et al., SIGMOD 2021; SageDB — CIDR 2019; <a href="https://dsail.csail.mit.edu/index.php/projects/">MIT DSAIL</a>; Redshift learned layouts — <a href="https://www.amazon.science/blog/building-systems-that-automatically-adjust-to-workloads-and-data">Amazon Science</a>.</li>
+      <li><span class="k">[11]</span> Vector internals: HNSW — TPAMI 2018; DiskANN — NeurIPS 2019; PQ — Jégou et al., TPAMI 2011.</li>
+      <li><span class="k">[12]</span> Canon: Hellerstein/Stonebraker/Hamilton FnT 2007; C-Store VLDB 2005; MonetDB/X100 CIDR 2005; Aurora SIGMOD 2017; Snowflake SIGMOD 2016; Lakehouse CIDR 2021; Photon SIGMOD 2022; Calvin SIGMOD 2012; Spanner OSDI 2012; Stonebraker &amp; Pavlo, SIGMOD Record 2024.</li>
+      <li><span class="k">[13]</span> Agent memory: Mem0 — arXiv 2504.19413; Zep/Graphiti — arXiv 2501.13956; MemGPT — arXiv 2310.08560.</li>
+      <li><span class="k">[14]</span> Security: Willison, <a href="https://simonwillison.net/2025/Jul/6/supabase-mcp-lethal-trifecta/">the lethal trifecta / Supabase MCP case</a>; Supabase, <a href="https://supabase.com/blog/defense-in-depth-mcp">Defense in Depth for MCP Servers</a>; Datadog Security Labs Postgres MCP injection.</li>
+      <li><span class="k">[15]</span> Context engineering: Anthropic, <a href="https://claude.com/blog/how-anthropic-enables-self-service-data-analytics-with-claude">self-service analytics</a> (June 2026) and <a href="https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents">effective context engineering</a>; EvalGen — Shankar et al., UIST 2024.</li>
+      <li><span class="k">[16]</span> OtterTune (2020–2024) postmortem — <a href="https://ottertune.com/">ottertune.com</a>; Idreos, The Data Calculator — SIGMOD 2018; Pavlo et al., Self-Driving DBMS — CIDR 2017.</li>
+    </ul>
+  </div>
+</section>
+
+</article>
+
+<footer>
+  <div class="colophon">
+    <div>
+      <h3>Colophon</h3>
+      <p>Essay № 02 of a series. The field notes survey real 2025–2026 syllabi at five universities, gathered by four parallel research agents reading the actual lecture schedules; the course itself is invented — a proposal for the gap they leave open. Companion to <a href="index.html">№ 01: Databases in the Age of AI</a>.</p>
+      <p>If you teach a database course and want to steal any of this: please do. That is the point. P8 especially.</p>
+    </div>
+    <div class="specs">
+      <b>Type</b> — Fraunces · Newsreader · IBM Plex Mono<br>
+      <b>Palette</b> — paper #F6F1E7 · ink #1D1A15 · oxblood #93321B<br>
+      <b>Stack</b> — one HTML file, zero dependencies<br>
+      <b>Built with</b> — <a href="https://claude.com/claude-code">Claude Code</a> · Fable 5<br>
+      <b>License</b> — CC BY 4.0
+    </div>
+  </div>
+</footer>
+
+<script>
+  const bar = document.getElementById('progress');
+  addEventListener('scroll', () => {
+    const h = document.documentElement;
+    bar.style.width = (h.scrollTop / (h.scrollHeight - h.clientHeight) * 100) + '%';
+  }, { passive: true });
+  const io = new IntersectionObserver(es => es.forEach(e => {
+    if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); }
+  }), { rootMargin: '0px 0px -8% 0px' });
+  document.querySelectorAll('.reveal').forEach(el => io.observe(el));
+</script>
+</body>
+</html>

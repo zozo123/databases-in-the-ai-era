@@ -14,7 +14,9 @@ Seven chapters:
 6. **Stress-Testing the Bull Case** — six complications for the "Databricks explodes" thesis
 7. **The Last Human Query** — ten dated, falsifiable predictions for 2027–2034
 
-Researched by five parallel AI agents, synthesized by a sixth. ~40 sources, cited in the margins; vendor-reported figures flagged as such.
+**Essay № 02 — [The 2027 Syllabus](https://zozo123.github.io/databases-in-the-ai-era/course.html):** DATA 2027: *Data Systems in the Agentic Era* — a hypothetical graduate course (the lovechild of MIT 6.5830, Harvard CS265, CMU 15-721, and Stanford CS245), preceded by field notes on what the real 2025–26 flagship courses actually teach. 14 weeks, 4 labs, 8 final projects, a synthesis exam.
+
+Researched by parallel AI agents (five for the essay, four for the syllabus), synthesized by one. All sources cited in the margins; vendor-reported figures flagged as such.
 
 Single HTML file, zero dependencies. Type: Fraunces / Newsreader / IBM Plex Mono.
 
