@@ -1,0 +1,25 @@
+[package]
+name = "vlsm"
+version = "0.1.0"
+edition = "2021"
+description = "DATA 2027 Lab 1 starter: an LSM-tree with vector segments (VLSM)"
+license = "CC-BY-4.0"
+
+# Ground rules (see lab handout): NO vector-search / ANN crates — no faiss,
+# hnswlib, usearch, instant-distance, qdrant-*, including via FFI. The
+# quantizer, the graph, and the brute-force oracle ARE the lab.
+#
+# Allowed additions beyond this file: crossbeam, rayon, memmap2, crc32c.
+# Ask on the forum before adding anything else.
+
+[dependencies]
+rand = "0.8"                                      # seeded StdRng for the workload generator
+serde = { version = "1", features = ["derive"] }  # report/CSV structs ONLY — never the on-disk format
+csv = "1.3"                                       # Pareto CSV output
+
+[profile.release]
+debug = true   # keep symbols so `perf` / Instruments can attribute time
+
+[[bin]]
+name = "bench"
+path = "src/bin/bench.rs"

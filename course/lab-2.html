@@ -274,6 +274,20 @@ func RunGC(horizon time.Duration) (GCReport, error) // two-phase, safe</code></p
   <div class="fleuron">❦</div>
 </section>
 
+<section class="block">
+  <div class="sec-label">Provided Materials</div>
+  <h2>Starter files</h2>
+  <div class="reads-block">
+    <div class="read-row"><div class="n">→</div><div class="t"><a href="materials/lab2/README.md">README.md</a><span class="v">architecture recap (safekeeper → pageserver → S3), MinIO docker one-liner, provided-vs-TODO map, and the 50-branch demo workflow</span></div></div>
+    <div class="read-row"><div class="n">→</div><div class="t"><a href="materials/lab2/go.mod">go.mod</a><span class="v">module data2027/lab2 (Go 1.22, minio-go v7); run `go mod tidy` once, then `go build ./...` compiles out of the box</span></div></div>
+    <div class="read-row"><div class="n">→</div><div class="t"><a href="materials/lab2/types.go">types.go</a><span class="v">complete &amp; normative: WalRecord encode/decode with crc32c, delta-span codec, LayerFileMeta + object-key grammar, BranchMeta — do not change</span></div></div>
+    <div class="read-row"><div class="n">→</div><div class="t"><a href="materials/lab2/storage.go">storage.go</a><span class="v">complete: thin ObjectStore (Put/Get/GetRange/List/Delete), in-memory fake with GET/PUT counters for tests, MinIO implementation</span></div></div>
+    <div class="read-row"><div class="n">→</div><div class="t"><a href="materials/lab2/pageserver.go">pageserver.go</a><span class="v">your M1–M2: IngestWAL, Flush, GetPage@LSN with the timeline-ancestry walk spelled out in comments; materializePage stubbed</span></div></div>
+    <div class="read-row"><div class="n">→</div><div class="t"><a href="materials/lab2/branch.go">branch.go</a><span class="v">your M3–M4: CreateBranch in O(metadata), DeleteBranch, and two-phase mark/grace/sweep RunGC with the safety contract in doc comments</span></div></div>
+    <div class="read-row"><div class="n">→</div><div class="t"><a href="materials/lab2/cmd/walgen/main.go">cmd/walgen/main.go</a><span class="v">complete deterministic WAL generator (seeded SplitMix64): emits main.wal, 50 branch streams forking at random LSNs, and plan.json</span></div></div>
+  </div>
+</section>
+
 <nav class="pager">
   <a href="lab-1.html"><span class="dir">← Lab 1</span><span class="ttl">Lab 1</span></a>
   <a class="next" href="lab-3.html"><span class="dir">Lab 3 →</span><span class="ttl">Lab 3</span></a>

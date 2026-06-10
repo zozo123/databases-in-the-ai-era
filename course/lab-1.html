@@ -241,6 +241,20 @@ pub fn merge_graphs(srcs: &amp;[&amp;VectorSegment], live: &amp;RowIdFilter,
   <div class="fleuron">❦</div>
 </section>
 
+<section class="block">
+  <div class="sec-label">Provided Materials</div>
+  <h2>Starter files</h2>
+  <div class="reads-block">
+    <div class="read-row"><div class="n">→</div><div class="t"><a href="materials/lab1/README.md">README.md</a><span class="v">Repo layout, build/run instructions, provided-vs-TODO map, and the Pareto CSV submission schema</span></div></div>
+    <div class="read-row"><div class="n">→</div><div class="t"><a href="materials/lab1/Cargo.toml">Cargo.toml</a><span class="v">Crate manifest — rand, serde, csv only; the ANN-crate ban is enforced from here</span></div></div>
+    <div class="read-row"><div class="n">→</div><div class="t"><a href="materials/lab1/src/lib.rs">src/lib.rs</a><span class="v">Core types, the Engine trait (put/get/scan/knn), EngineConfig/HnswParams, error enum, ParetoRow</span></div></div>
+    <div class="read-row"><div class="n">→</div><div class="t"><a href="materials/lab1/src/memtable.rs">src/memtable.rs</a><span class="v">Complete BTreeMap memtable with a DocId→Vector side-table, brute-force knn, and the flush iterator</span></div></div>
+    <div class="read-row"><div class="n">→</div><div class="t"><a href="materials/lab1/src/sstable.rs">src/sstable.rs</a><span class="v">Normative on-disk byte layout (header, key block, codes, PQ codebook, HNSW CSR, footer), working writer, reader stubs for Milestone 1</span></div></div>
+    <div class="read-row"><div class="n">→</div><div class="t"><a href="materials/lab1/src/workload.rs">src/workload.rs</a><span class="v">Deterministic seeded agent trace — 70% Zipfian-repeat knn, 20% upserts, 10% scans — with brute-force ground truth per query</span></div></div>
+    <div class="read-row"><div class="n">→</div><div class="t"><a href="materials/lab1/src/bin/bench.rs">src/bin/bench.rs</a><span class="v">Smoke harness: replays the trace against the memtable (recall must print 1.0) and emits a schema-correct pareto.csv row</span></div></div>
+  </div>
+</section>
+
 <nav class="pager">
   <a href="index.html"><span class="dir">← Course home</span><span class="ttl">Course home</span></a>
   <a class="next" href="lab-2.html"><span class="dir">Lab 2 →</span><span class="ttl">Lab 2</span></a>

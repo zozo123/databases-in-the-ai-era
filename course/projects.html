@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Final Projects — DATA 2027</title>
+<meta name="description" content="Eight publishable questions wearing projects’ clothing — the DATA 2027 final project menu, expectations, and timeline.">
+<meta name="theme-color" content="#f6f1e7">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23f6f1e7'/%3E%3Cellipse cx='50' cy='28' rx='30' ry='12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 28v44c0 6.6 13.4 12 30 12s30-5.4 30-12V28' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 50c0 6.6 13.4 12 30 12s30-5.4 30-12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500;9..144,600;9..144,900&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400;1,6..72,500&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="course.css">
+</head>
+<body>
+
+<div class="masthead">
+  <span><a href="index.html">DATA 2027</a> <span class="dot">●</span> DATA SYSTEMS IN THE AGENTIC ERA</span>
+  <span><a href="index.html">← SCHEDULE</a></span>
+</div>
+
+<header class="page-head">
+  <div class="kicker">Final Project · Teams of Two · CIDR-format paper + artifact</div>
+  <h1>Eight Questions Wearing <em>Projects&rsquo;</em> Clothing</h1>
+  <p class="standfirst">The final project is not a class assignment that happens to look like research; it is research that happens to be graded. Pick one of eight open questions, build the artifact that answers it, and write the paper a program committee would want to read.</p>
+  <div class="meta"><b>Teams:</b> exactly two &nbsp;·&nbsp; <b>Deliverable:</b> CIDR-format paper (≤ 7 pages) + working artifact &nbsp;·&nbsp; <b>Weight:</b> 35% of the course grade</div>
+</header>
+
+<main>
+
+<section class="block">
+  <div class="objectives">
+    <div class="k">What the project teaches — by the end you can…</div>
+    <ul>
+      <li>Turn a one-line research question into a falsifiable hypothesis with a measurable baseline</li>
+      <li>Build a systems artifact whose experiments someone else can rerun from a single script</li>
+      <li>Write a CIDR-style paper: a clear claim, an honest evaluation, and a real limitations section</li>
+      <li>Defend a negative result as rigorously as a positive one</li>
+    </ul>
+  </div>
+</section>
+
+<section class="block">
+  <div class="sec-label">Expectations</div>
+  <h2>What &ldquo;Done&rdquo; Means</h2>
+  <p class="opener">Every project on the menu is a publishable question. That cuts both ways: nobody expects a VLDB acceptance in fourteen weeks, but everybody is held to the standards that make one possible. Three of those standards are non-negotiable.</p>
+
+  <h3>Paper format</h3>
+  <p>Your report is a CIDR-format paper, at most seven pages plus references, written for a reader who knows databases but has not taken this course. It must state a hypothesis in the introduction, describe the artifact precisely enough to reimplement, and evaluate against at least one serious baseline — &ldquo;we didn&rsquo;t compare against anything&rdquo; is the most common cause of a failing project grade. A related-work section that engages honestly with the references listed under each project below is expected, not optional.</p>
+
+  <h3>The artifact bar</h3>
+  <p>The artifact is code that runs. The bar: a fresh checkout, one setup command, one experiment script, and every figure in your paper regenerates. We will actually do this. Prototypes are fine — you may fork RocksDB rather than write an LSM tree, stub a planner rather than write one — but the measured path must be real, and anything mocked must be declared in the paper.</p>
+
+  <h3>Honest negative results</h3>
+  <p>If your hypothesis turns out to be false, you have not failed the project — you have completed it. A paper that says &ldquo;speculative pre-execution does not pay for itself below 40 branches/hour, and here is the measurement that shows why&rdquo; earns full marks. What fails is dishonesty: cherry-picked workloads, missing error bars, baselines configured to lose. We grade the rigor of the investigation, not the sign of the result.</p>
+
+  <div class="aside"><span class="k">A note on frontier models</span>You may use models and agents for anything — coding, literature search, even drafting. You are accountable for every claim and every number. &ldquo;The model said so&rdquo; has an accuracy of zero as a citation.</div>
+
+  <h3>Timeline</h3>
+  <table>
+    <tr><th>Milestone</th><th>Week</th><th>Deliverable</th><th>Stakes</th></tr>
+    <tr><td><b>Proposal</b></td><td>Week 6</td><td>2 pages: hypothesis, baseline, evaluation plan, division of labor</td><td>Graded pass/revise; you cannot start Lab credit on the project without a pass</td></tr>
+    <tr><td><b>Midway check</b></td><td>Week 10</td><td>Artifact skeleton runs end-to-end on a toy workload; one preliminary plot</td><td>15-minute meeting; this is where doomed scopes get cut, not punished</td></tr>
+    <tr><td><b>Final report</b></td><td>Week 14</td><td>CIDR paper + tagged artifact release + 10-minute talk</td><td>The 35%</td></tr>
+  </table>
+</section>
+
+<section class="block">
+  <div class="sec-label">The Menu</div>
+  <h2>Choose One of Eight</h2>
+  <p>Each brief expands the one-liner from the syllabus into motivation, deliverables, milestones, and the shape of a strong result. You may propose a variation; you may not propose a ninth project without instructor sign-off and a written hypothesis at least as sharp as these.</p>
+
+  <div class="exercise">
+    <div class="ex-head">P1 · Recall-aware compaction</div>
+    <div class="ex-body">
+      <p><b>Motivation.</b> LSM compaction policies are tuned for write amplification and read cost; vector indexes are tuned for recall. When a graph index like HNSW lives inside an LSM engine, compaction silently rewires the graph — and nobody currently co-optimizes the two. The result is engines that pay full compaction cost while degrading the very recall the index exists to provide.</p>
+      <p><b>Deliverables.</b> A compaction policy (in a real LSM engine or a faithful simulator) whose cost function includes a graph-quality term; a measurement harness that tracks recall@k and write amplification across compaction schedules; a paper characterizing the recall/write-amp Pareto frontier.</p>
+      <p><b>Milestones.</b> (1) Reproduce baseline: measure recall degradation under leveled and tiered compaction on a standard ANN dataset. (2) Implement the recall-aware policy and show it moves at least one point on the frontier. (3) Sensitivity study: vary update rate and dimensionality; find where the policy stops paying.</p>
+      <p><b>A strong result</b> shows a policy that dominates a stock policy on at least one axis without losing on the other, with an explanation of <i>why</i> grounded in graph connectivity — or a principled argument that the frontier is inherently flat.</p>
+      <p><b>Key references.</b> Malkov &amp; Yashunin, HNSW (TPAMI 2018); Idreos et al., The Data Calculator (SIGMOD 2018).</p>
+    </div>
+  </div>
+
+  <div class="exercise">
+    <div class="ex-head">P2 · Transactional agent memory</div>
+    <div class="ex-body">
+      <p><b>Motivation.</b> Agent memory systems like Mem0 and Graphiti give agents long-term state, but with the consistency guarantees of a sticky note: no isolation, no history, no audit trail. An agent acting on memory that another agent is concurrently rewriting is a correctness bug wearing a product feature&rsquo;s clothing.</p>
+      <p><b>Deliverables.</b> A Mem0-class memory store with snapshot isolation across concurrent agent sessions, time-travel reads (&ldquo;what did the agent believe at t?&rdquo;), and an append-only audit log; a benchmark suite comparing latency, recall, and consistency anomalies against Graphiti.</p>
+      <p><b>Milestones.</b> (1) MVCC core: versioned memory writes with snapshot reads, demonstrated with two concurrent sessions. (2) Time travel + audit log, with a replay tool. (3) Head-to-head benchmark against Graphiti on a multi-agent workload, counting observed anomalies under each system.</p>
+      <p><b>A strong result</b> quantifies the price of isolation — how much latency and storage snapshot semantics cost — and demonstrates at least one real anomaly class that the baseline exhibits and your system prevents.</p>
+      <p><b>Key references.</b> Mem0 (arXiv 2504.19413); Zep/Graphiti (arXiv 2501.13956); MemGPT (arXiv 2310.08560).</p>
+    </div>
+  </div>
+
+  <div class="exercise">
+    <div class="ex-head">P3 · An MCP gateway with provenance-based row security</div>
+    <div class="ex-body">
+      <p><b>Motivation.</b> The lethal-trifecta incidents of 2025 showed that an MCP server with database access turns every row of untrusted data into a potential instruction stream. Application-layer prompt filtering keeps failing because it asks the model to police itself; the database community&rsquo;s answer — enforce policy below the model — has not yet been built for MCP.</p>
+      <p><b>Deliverables.</b> A gateway that sits between an MCP client and a real database, tagging rows with provenance and enforcing row-security policy <i>regardless of what the model asks for</i>; a red-team report where you attack your own gateway with injection payloads embedded in data; a paper on what survived.</p>
+      <p><b>Milestones.</b> (1) Working gateway with static row policies; demonstrate it blocks a textbook exfiltration. (2) Provenance tagging: policies that depend on where data came from, not just who asks. (3) Structured red-team: a corpus of injection attacks, success rates with and without the gateway.</p>
+      <p><b>A strong result</b> is a defense with a precisely stated threat model, an attack corpus that breaks the unprotected baseline near-100% of the time, and an honest accounting of what still gets through — a gateway that &ldquo;blocks everything&rdquo; is a gateway that hasn&rsquo;t been attacked properly.</p>
+      <p><b>Key references.</b> Willison, the lethal trifecta / Supabase MCP case (2025); Supabase, <i>Defense in Depth for MCP Servers</i>.</p>
+    </div>
+  </div>
+
+  <div class="exercise">
+    <div class="ex-head">P4 · Speculative query execution</div>
+    <div class="ex-body">
+      <p><b>Motivation.</b> Agents issue queries in long, structured chains — explore the schema, sample a table, refine a filter — and each round trip stalls the whole reasoning loop. Branching storage engines make speculation cheap; what&rsquo;s missing is the predictor. If an agent&rsquo;s next five queries are guessable from its trace, the database can have the answers waiting.</p>
+      <p><b>Deliverables.</b> A predictor (learned or heuristic) over agent query traces; a speculative executor that pre-runs predicted queries on branches and serves hits from cache; an evaluation on real agent traces measuring hit rate, latency saved, and wasted work.</p>
+      <p><b>Milestones.</b> (1) Trace collection: instrument an agent on a text-to-SQL benchmark, characterize query-sequence predictability. (2) Predictor + speculative executor with a wasted-work budget. (3) End-to-end: agent task latency with and without speculation, across budget settings.</p>
+      <p><b>A strong result</b> reports the crossover honestly: at what hit rate does speculation pay for its wasted compute, and do real agent traces clear that bar? A clean &ldquo;no, and here&rsquo;s the predictability ceiling&rdquo; is as publishable as a yes.</p>
+      <p><b>Key references.</b> Spider 2.0 (ICLR 2025) for workloads; Neon&rsquo;s branching architecture; Marcus et al., Bao (SIGMOD 2021) for learning-from-feedback framing.</p>
+    </div>
+  </div>
+
+  <div class="exercise">
+    <div class="ex-head">P5 · A semantic-layer compiler</div>
+    <div class="ex-body">
+      <p><b>Motivation.</b> Every team now pastes its dbt docs into a system prompt and calls it context engineering. But a semantic layer is a formal artifact — metrics, joins, grain — and the mapping from that artifact to a token budget is a compilation problem, not a copy-paste problem. Nobody has treated it as one.</p>
+      <p><b>Deliverables.</b> A compiler from dbt/Cube semantic definitions to model-optimized context, with token-budget-aware schema elision (drop, summarize, or defer the parts of the schema least relevant to the query); an evaluation on a text-to-SQL benchmark across budget levels.</p>
+      <p><b>Milestones.</b> (1) Parser + naive serializer: full semantic layer to context, measure baseline accuracy and token cost. (2) Elision engine: relevance-ranked compression under a hard budget. (3) Accuracy-vs-tokens curves across three budgets and two models; ablate each elision strategy.</p>
+      <p><b>A strong result</b> is the curve itself: accuracy as a function of token budget, with the compiled context dominating naive truncation, plus a taxonomy of which schema facts models actually need and which they reliably infer.</p>
+      <p><b>Key references.</b> Anthropic, effective context engineering for AI agents; BIRD (NeurIPS 2023) and Spider 2.0 (ICLR 2025) for evaluation.</p>
+    </div>
+  </div>
+
+  <div class="exercise">
+    <div class="ex-head">P6 · Bao-for-LOTUS</div>
+    <div class="ex-body">
+      <p><b>Motivation.</b> Bao showed that a learned advisor steering a classical optimizer&rsquo;s hints beats replacing the optimizer outright. Semantic-operator pipelines in LOTUS face an even richer steering space — model choice, cascade thresholds, operator ordering — and currently navigate it with static heuristics. The Bao recipe has not been tried where it may matter most.</p>
+      <p><b>Deliverables.</b> A learned steering layer for LOTUS pipelines that chooses among rewrite/configuration options using execution feedback (cost <i>and</i> accuracy); a benchmark of semantic pipelines with ground truth; an evaluation against LOTUS&rsquo;s native optimizations.</p>
+      <p><b>Milestones.</b> (1) Define the hint space: enumerate steerable choices in three real LOTUS pipelines and measure the spread between best and worst plans. (2) Feedback loop: bandit or regression model picking plans from observed (cost, accuracy) outcomes. (3) Evaluation: cumulative regret against static defaults and against an oracle.</p>
+      <p><b>A strong result</b> shows the learned advisor closing most of the gap to the oracle within a realistic number of pipeline executions — or demonstrates that accuracy feedback is too noisy/expensive to learn from, with a measurement of exactly how noisy.</p>
+      <p><b>Key references.</b> Marcus et al., Bao (SIGMOD 2021); Patel et al., LOTUS (VLDB 2025).</p>
+    </div>
+  </div>
+
+  <div class="exercise">
+    <div class="ex-head">P7 · Branch-native CI for data</div>
+    <div class="ex-body">
+      <p><b>Motivation.</b> Software earned its reliability with pull requests, CI, and review; tables get none of that — agents and pipelines mutate production data with no staging, no diff, no gate. Iceberg snapshots make cheap table branches possible, and agents are good at writing tests; the missing piece is the system that wires them into a &ldquo;pull request for tables.&rdquo;</p>
+      <p><b>Deliverables.</b> A working PR-for-tables system on Iceberg: branch, mutate, auto-generate data tests (agent-written expectations over the diff), gate the merge; a study of test quality — do agent-generated tests catch real regressions?</p>
+      <p><b>Milestones.</b> (1) Mechanics: branch/diff/merge workflow on Iceberg snapshots with a CLI. (2) Agent test generation from table diffs and history; merge gate. (3) Fault injection: seed realistic data bugs, measure catch rate and false-positive rate of generated tests.</p>
+      <p><b>A strong result</b> reports precision and recall of the merge gate on injected faults, and an honest analysis of the failure modes — the bugs agent-written tests systematically miss are the most interesting finding available here.</p>
+      <p><b>Key references.</b> Lakehouse (CIDR 2021); Shankar et al., EvalGen (UIST 2024) on validating LLM-generated checks.</p>
+    </div>
+  </div>
+
+  <div class="exercise">
+    <div class="ex-head">P8 · The agent-native TPC</div>
+    <div class="ex-body">
+      <p><b>Motivation.</b> Every claim in this course — about speculation, memory, gateways, semantic layers — is currently unfalsifiable at scale because no benchmark models an agentic database client: bursty query chains, schema exploration, branch-heavy speculation, mid-task abandonment. TPC-C modeled a warehouse clerk; nothing models a model. The field needs this more than it needs another engine.</p>
+      <p><b>Deliverables.</b> A published benchmark: a workload generator that replays parameterized agent behavior against any SQL endpoint, a metrics suite beyond throughput (time-to-task-completion, wasted work, context-fetch cost), and reference runs on at least two real systems.</p>
+      <p><b>Milestones.</b> (1) Workload characterization: collect and analyze real agent traces; defend the generator&rsquo;s parameters against them. (2) Generator + metrics implementation, runnable against Postgres out of the box. (3) Reference runs on two systems with a published, versioned spec and leaderboard format.</p>
+      <p><b>A strong result</b> is a benchmark other people can run without you in the room — and whose metrics provably distinguish systems that conventional benchmarks rank as equivalent. If TPC-C and your benchmark always agree, your benchmark isn&rsquo;t measuring anything new.</p>
+      <p><b>Key references.</b> Spider 2.0 (ICLR 2025); BIRD (NeurIPS 2023); the TPC-C specification, read as a design document rather than a relic.</p>
+    </div>
+  </div>
+
+  <div class="fleuron">❦</div>
+</section>
+
+<nav class="pager">
+  <a href="index.html"><span class="dir">← Back</span><span class="ttl">Course home</span></a>
+  <a class="next" href="exam.html"><span class="dir">Next →</span><span class="ttl">The Synthesis Exam</span></a>
+</nav>
+
+</main>
+
+<footer class="site">
+  <div class="inner">
+    <span>DATA 2027 — a course that doesn&rsquo;t exist yet · <a href="../index.html">Essay № 01</a> · <a href="../course.html">Essay № 02</a></span>
+    <span>CC BY 4.0 · built with <a href="https://claude.com/claude-code">Claude Code</a></span>
+  </div>
+</footer>
+
+</body>
+</html>

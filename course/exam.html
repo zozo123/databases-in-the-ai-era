@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Synthesis Exam — DATA 2027</title>
+<meta name="description" content="Five questions that cannot be answered from one community’s literature alone — the DATA 2027 take-home, open-everything synthesis exam.">
+<meta name="theme-color" content="#f6f1e7">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23f6f1e7'/%3E%3Cellipse cx='50' cy='28' rx='30' ry='12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 28v44c0 6.6 13.4 12 30 12s30-5.4 30-12V28' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 50c0 6.6 13.4 12 30 12s30-5.4 30-12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500;9..144,600;9..144,900&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400;1,6..72,500&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="course.css">
+</head>
+<body>
+
+<div class="masthead">
+  <span><a href="index.html">DATA 2027</a> <span class="dot">●</span> DATA SYSTEMS IN THE AGENTIC ERA</span>
+  <span><a href="index.html">← SCHEDULE</a></span>
+</div>
+
+<header class="page-head">
+  <div class="kicker">Take-home · Open everything, including frontier models · 72 hours</div>
+  <h1>The <em>Synthesis</em> Exam</h1>
+  <p class="standfirst">Five questions, each requiring you to hold two layers of the stack in tension at once. None can be answered from one community&rsquo;s literature alone — that is the entire design.</p>
+  <div class="meta"><b>Format:</b> released Friday 09:00, due Monday 09:00 &nbsp;·&nbsp; <b>Length:</b> answer all five; ~2 pages each &nbsp;·&nbsp; <b>Weight:</b> 10% of the course grade</div>
+</header>
+
+<main>
+
+<section class="block">
+  <div class="sec-label">Philosophy</div>
+  <h2>Why Open-Model</h2>
+  <p class="opener">You may use anything: every paper, every system, and every frontier model you can reach. We mean this literally, and not as a trap. A closed-book exam in 2027 would certify a skill — unaided recall under time pressure — that no working systems researcher has needed since the field began carrying its literature in its pocket. Pretending otherwise teaches the wrong lesson twice: that the models don&rsquo;t exist, and that your value lies in what they already do well.</p>
+  <p>So the exam is calibrated against the models. Each question was given, in draft form, to the strongest frontier models available, and revised until their unaided answers were fluent, confident, and wrong in instructive ways — missing the load-bearing assumption, citing the right paper for the wrong claim, formalizing the easy half of the problem. The questions reward exactly what the models still struggle to fake: holding a storage-layer invariant and a model-layer behavior in your head simultaneously, and noticing where they contradict each other. If you can prompt your way to a strong answer, you will have done the synthesis yourself in the prompting.</p>
+  <p>Practical advice from previous drafts of this exam: budget your 72 hours for thinking, not typing. A two-page answer that nails the central tension beats a ten-page survey every time, and the rubric below is built to guarantee it.</p>
+
+  <h3>Grading rubric</h3>
+  <table>
+    <tr><th>Dimension</th><th>Weight</th><th>What it measures</th></tr>
+    <tr><td><b>Rigor</b></td><td>40</td><td>Are the claims precise, the derivations correct, the assumptions stated? A wrong number with shown work outscores a right number asserted.</td></tr>
+    <tr><td><b>Synthesis</b></td><td>30</td><td>Does the answer genuinely connect the two layers in tension, or summarize each side and gesture at the gap?</td></tr>
+    <tr><td><b>Formalization</b></td><td>20</td><td>Definitions that could survive a hostile reviewer: trade-off spaces with named axes, protocols with failure cases, conjectures stated tightly enough to refute.</td></tr>
+    <tr><td><b>Writing</b></td><td>10</td><td>Structure, economy, and the honesty to flag what you don&rsquo;t know.</td></tr>
+  </table>
+
+  <div class="aside"><span class="k">Academic integrity, agentic-era edition</span>The rule is accountability, not abstinence. You may collaborate with models freely; you may not collaborate with classmates at all. Every claim in your submission is <i>yours</i> — if a model hallucinated a theorem and you signed it, you signed it. Submissions include a one-paragraph methods note describing how you used models; this note is never penalized for honesty, only for absence.</div>
+</section>
+
+<section class="block">
+  <div class="sec-label">The Questions</div>
+  <h2>Five Tensions, Seventy-Two Hours</h2>
+
+  <div class="exercise">
+    <div class="ex-head">Q1 · RUM-R</div>
+    <div class="ex-body">
+      <p>The RUM conjecture says an access method can optimize two of read overhead, update overhead, and memory overhead only at the expense of the third. Approximate access methods break the conjecture&rsquo;s framing: they buy performance with a currency RUM doesn&rsquo;t price — recall. Formalize a fourth axis, <b>R</b>ecall, for approximate access methods. Define the four-dimensional trade-off space precisely: what does each axis measure, against what workload, and what does it mean for an index to be &ldquo;optimal&rdquo; on an axis? Then prove or refute a four-way impossibility result analogous to the original conjecture — does fixing any three axes bound the fourth? Finally, place HNSW, DiskANN, and your Lab 1 engine as points (or curves) in the space you defined, and defend the placement with measurements or derivations.</p>
+      <p><b>What a strong answer engages with.</b> The original RUM framing (Athanassoulis et al.) and what its proof technique actually depends on, since &ldquo;analogous&rdquo; is doing heavy lifting in this question. The structural reasons HNSW (TPAMI 2018) and DiskANN (NeurIPS 2019) sit at genuinely different points — memory-resident graph navigability versus SSD-aware layouts — rather than at different parameter settings of the same point. And a clear-eyed treatment of whether recall is an axis like the others or a constraint of a different type, which is where most fluent-but-wrong answers quietly collapse.</p>
+    </div>
+  </div>
+
+  <div class="exercise">
+    <div class="ex-head">Q2 · Aurora for agents</div>
+    <div class="ex-body">
+      <p>Aurora&rsquo;s claim is &ldquo;the log is the database&rdquo;: redo processing is pushed to a distributed storage tier and replicas hang off the shared log. Neon&rsquo;s claim is &ldquo;the log is the database, and the database is a tree of branches&rdquo;: copy-on-write pages over a shared WAL make a branch nearly free at creation. Now impose an agentic workload: 10,000 speculative branches per hour, each receiving a small number of writes, most abandoned within minutes, a few merged or promoted. Derive the write-amplification and storage-cost consequences of this workload under each architecture — state your model of page sizes, branch lifetimes, and write skew explicitly — and identify the workload crossover point: at what branch creation rate, lifetime distribution, or write profile does each architecture dominate?</p>
+      <p><b>What a strong answer engages with.</b> The actual mechanisms in the Aurora paper (SIGMOD 2017) — what &ldquo;the log is the database&rdquo; commits you to when a branch is not a replica — versus Neon&rsquo;s page-server/safekeeper split and where copy-on-write defers cost rather than eliminating it. The derivation must separate creation cost, carrying cost, and abandonment cost, because the architectures differ on different terms. The best answers notice that &ldquo;crossover point&rdquo; is a surface in several variables, not a number, and choose which slice of it to compute honestly.</p>
+    </div>
+  </div>
+
+  <div class="exercise">
+    <div class="ex-head">Q3 · Stonebraker&rsquo;s wager</div>
+    <div class="ex-body">
+      <p><i>What Goes Around Comes Around… And Around</i> (Stonebraker &amp; Pavlo, 2024) has a fixed argumentative structure: a data-model insurgency arises, wins mindshare, and is then absorbed by the relational incumbent, which adopts the feature and keeps the market. Write the section of the 2034 sequel that covers semantic operators. Argue one side: either LOTUS-style operators get absorbed into SQL — in which case cite the specific historical precedent whose dynamics you are claiming repeat, and show the absorption mechanism — or the accuracy/cost dimension makes semantic operators the first true escape from the relational gravity well, in which case explain precisely which property of the relational contract they break that XML, objects, and documents did not. Match the essay&rsquo;s voice: name winners, assign blame, commit to predictions.</p>
+      <p><b>What a strong answer engages with.</b> The mechanics of the precedents as the 2024 essay actually tells them — why objects lost, why JSON was absorbed rather than victorious — not folklore versions of them. The LOTUS (VLDB 2025) and Palimpzest (CIDR 2025) treatment of accuracy as an explicit optimizer objective, which is the property any escape argument must rest on and any absorption argument must explain away. Strong answers also confront the strongest counter-case to their chosen side; the essay being imitated never pretends its opponents had no point.</p>
+    </div>
+  </div>
+
+  <div class="exercise">
+    <div class="ex-head">Q4 · The optimizer&rsquo;s new objective</div>
+    <div class="ex-body">
+      <p>System R&rsquo;s dynamic programming rests on a principle of optimality: the best plan for a query contains the best plans for its sub-expressions, so the optimizer can prune any sub-plan dominated on cost (modulo interesting orders). Semantic-operator optimizers cannot rank plans by cost alone, because plans now carry a (cost, accuracy) pair and the objective is a trade-off, not a total order. Show formally why System R&rsquo;s pruning breaks under a (cost, accuracy) partial order: construct a query and a pair of sub-plans where the dominated-on-cost sub-plan participates in the globally preferable complete plan. Then propose a plan-enumeration strategy that does not break — define what your optimizer keeps per equivalence class, bound how much it keeps, and state the conditions under which it remains exact versus heuristic.</p>
+      <p><b>What a strong answer engages with.</b> The precise statement of the optimality principle in Selinger et al. (1979), including the interesting-orders mechanism — which is the historical precedent for &ldquo;keep more than one plan per class&rdquo; and which weaker answers fail to notice cuts both ways. How accuracy composes across operators (it is neither additive like cost nor preserved like sortedness), drawing on how LOTUS and Palimpzest actually model it. And the size of the Pareto frontier the proposed strategy must carry, with an argument about when it stays tractable.</p>
+    </div>
+  </div>
+
+  <div class="exercise">
+    <div class="ex-head">Q5 · Isolation for liars</div>
+    <div class="ex-body">
+      <p>Two agents run under read-committed. Each reads a table, summarizes it into its own memory store, and later acts on that summary. Between read and action, the table changes; each agent&rsquo;s behavior is now driven by a belief that was never false at any single instant but is false now — a <i>semantic phantom</i>. Note that no classical anomaly has occurred: every read was committed data. Define an isolation level for derived-belief consistency: state what it guarantees about the relationship between a memory entry and the base data it summarizes, give the anomaly it forbids as precisely as the ANSI levels give theirs, and specify a versioning protocol that enforces it (what gets timestamped, what gets invalidated, who is notified). Then argue where the mechanism belongs — in the DBMS, in the memory layer, or in the protocol between them — and what each placement costs.</p>
+      <p><b>What a strong answer engages with.</b> The formal style of the isolation literature — Berenson et al.&rsquo;s critique of the ANSI levels is the model for how to define an anomaly without hand-waving — extended to reads that pass through a lossy summarization function, which is what makes this not just a stale-materialized-view problem. The actual write paths of Mem0 (arXiv 2504.19413) and Graphiti (arXiv 2501.13956), since a protocol that cannot be retrofitted onto at least one real memory system is a protocol for a system that doesn&rsquo;t exist. And an honest cost model for the placement argument: invalidation traffic, false invalidations under summarization, and who pays at scale.</p>
+    </div>
+  </div>
+
+  <div class="fleuron">❦</div>
+</section>
+
+<nav class="pager">
+  <a href="projects.html"><span class="dir">← Back</span><span class="ttl">Final Projects</span></a>
+  <a class="next" href="index.html"><span class="dir">Next →</span><span class="ttl">Course home</span></a>
+</nav>
+
+</main>
+
+<footer class="site">
+  <div class="inner">
+    <span>DATA 2027 — a course that doesn&rsquo;t exist yet · <a href="../index.html">Essay № 01</a> · <a href="../course.html">Essay № 02</a></span>
+    <span>CC BY 4.0 · built with <a href="https://claude.com/claude-code">Claude Code</a></span>
+  </div>
+</footer>
+
+</body>
+</html>

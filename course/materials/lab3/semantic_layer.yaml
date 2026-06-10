@@ -1,0 +1,150 @@
+# semantic_layer.yaml — Vantage Retail Group governed metrics
+# Cube-style document. This is the INSTRUCTOR reference layer; in the lab
+# you write your own from scratch, but the autograder parses this format.
+# Written against the SCHEMA, never against eval questions (see lab rules).
+
+version: 1
+dialect: duckdb
+snapshot_logical_date: 2025-11-30
+
+cubes:
+  - name: revenue
+    sql_table: finance.revenue_recognized
+    description: >
+      Canonical revenue. Grain: one row per order line per recognition
+      event (accrual basis; recognition lags shipment by up to 30 days).
+      Amounts are pre-converted USD, net of contract discounts. Any
+      unqualified "revenue" question resolves here.
+    filters:
+      - sql: "posting_status = 'posted'"   # pending/reversed rows must never be summed
+    measures:
+      - { name: amount,        sql: amount_usd, type: sum, format: usd }
+      - { name: rev_rec_rows,  sql: rev_rec_id, type: count }
+    dimensions:
+      - { name: recognized_date, sql: recognized_date, type: time }
+      - { name: cost_center_id,  sql: cost_center_id,  type: number }
+    joins:
+      - name: order_lines
+        sql: "{revenue}.order_line_id = {order_lines}.order_line_id"
+        relationship: many_to_one          # several recognition events per line
+      - name: fiscal_calendar
+        sql: "{revenue}.recognized_date = {fiscal_calendar}.date_key"
+        relationship: many_to_one
+    anti_patterns:
+      - "sales.rev_billed is invoice-line grain on the billed date and
+         INCLUDES tax and shipping; it is billing, not revenue."
+      - "finance.bookings is order-header grain at placement, includes
+         later-cancelled orders, and is in LOCAL currency (currency_code
+         defaults to 'EUR', not USD). Never sum bookings.amount as USD."
+      - "finance.revenue_recognized_v1 was frozen at the 2024-06-30 ERP
+         cutover and is order-grain. Deprecated; never query."
+
+  - name: active_users
+    sql_table: marketing.active_users
+    description: >
+      Governed active-user metric: rolling 30-day window, daily snapshot,
+      fraud-flagged accounts excluded (marketing.fraud_flags). This is the
+      definition used in board reporting; say so when answering.
+    measures:
+      - { name: count, sql: active_user_count, type: max }   # already aggregated per snapshot_date
+    dimensions:
+      - { name: snapshot_date, sql: snapshot_date, type: time }
+    anti_patterns:
+      - "web.active_users_daily is a 1-DAY window and includes traffic
+         later flagged as bots; numbers are not comparable to the 30-day
+         governed metric and must be labeled 'web daily' if used."
+      - "marketing.active_users_old (7-day window, no fraud filter) was
+         frozen 2025-02-14. Deprecated; never query."
+
+  - name: orders
+    sql_table: orders.orders
+    description: >
+      Order headers. order_total is integer MINOR UNITS (cents) in the
+      order's own currency; currency_code defaults to the local
+      merchant-of-record currency, NOT USD. customer_id is NULL for guest
+      checkout (~14% of rows) — inner joins to customers drop those orders.
+    filters:
+      - sql: "status <> 'cancelled'"       # default for value metrics; row counts may include cancelled
+    measures:
+      - { name: order_count,      sql: order_id,            type: count }
+      - { name: order_value_usd,  sql: "order_total / 100.0", type: sum, format: usd,
+          requires_filter: "currency_code = 'USD'" }
+      - { name: aov_usd,          sql: "order_total / 100.0", type: avg, format: usd,
+          requires_filter: "currency_code = 'USD'" }
+    dimensions:
+      - { name: order_ts,       sql: order_ts,      type: time }
+      - { name: status,         sql: status,        type: string }
+      - { name: currency_code,  sql: currency_code, type: string }
+      - { name: channel,        sql: channel,       type: string }
+    joins:
+      - name: customers
+        sql: "{orders}.customer_id = {customers}.customer_id"
+        relationship: many_to_one
+        note: "LEFT join unless the question explicitly scopes to registered customers."
+    anti_patterns:
+      - "Never mix order_total (cents, local currency) with any DECIMAL
+         dollar column (e.g. returns.refunds.refund_amount) without
+         dividing by 100.0 and filtering or converting currency."
+      - "orders.orders_old / orders.order_lines_old were frozen
+         2024-09-30 and store DECIMAL dollars. Deprecated; never query."
+
+  - name: refunds
+    sql_table: returns.refunds
+    description: >
+      Issued refunds. refund_amount is DECIMAL DOLLARS (currency_code
+      defaults to USD) — the opposite convention from orders.order_total.
+    measures:
+      - { name: refund_total, sql: refund_amount, type: sum, format: usd,
+          requires_filter: "currency_code = 'USD'" }
+      - { name: refund_count, sql: refund_id, type: count }
+    dimensions:
+      - { name: refunded_at, sql: refunded_at, type: time }
+    joins:
+      - name: returns
+        sql: "{refunds}.return_id = {returns}.return_id"
+        relationship: many_to_one
+    anti_patterns:
+      - "returns.refunds_v1 stored CENTS and was frozen 2024-09-30.
+         Deprecated; never query."
+
+  - name: customers
+    sql_table: sales.customers
+    description: >
+      ERP system of record for customers, keyed by numeric customer_id.
+      Unqualified "customers" means this table.
+    measures:
+      - { name: customer_count, sql: customer_id, type: count }
+    dimensions:
+      - { name: region,  sql: region,  type: string }
+      - { name: segment, sql: segment, type: string }
+    anti_patterns:
+      - "marketing.customers is the CDP copy keyed by email_hash; one
+         person can hold several hashes and crm_customer_id is often
+         NULL. Never use it for customer counts."
+      - "sales.customers_bak is a one-off 2024-11-02 backup. Never query."
+
+metrics:
+  - name: return_rate
+    description: "Units returned / units sold, same period, percent."
+    numerator:   { cube: refunds_items, sql: "SUM(returns.return_items.qty)" }
+    denominator: { cube: orders,        sql: "SUM(orders.order_lines.qty)" }
+    note: >
+      Join return_items -> order_lines on order_line_id to attribute a
+      return to a product; never join returns to orders on customer_id
+      (NULL for guests) when order_id is available.
+
+deprecated_tables:   # never to be referenced by generated SQL
+  - finance.revenue_recognized_v1
+  - finance.bookings_old
+  - sales.customers_bak
+  - sales.rev_billed_v1
+  - orders.orders_old
+  - orders.order_lines_old
+  - returns.refunds_v1
+  - marketing.active_users_old
+  - marketing.campaigns_v1
+  - web.sessions_bak
+  - web.events_v1
+  - ops.products_v1
+  - ops.inventory_levels_bak
+  - hr.employees_old
