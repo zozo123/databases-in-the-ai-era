@@ -16,6 +16,8 @@ Seven chapters:
 
 **Essay № 02 — [The 2027 Syllabus](https://zozo123.github.io/databases-in-the-ai-era/course.html):** DATA 2027: *Data Systems in the Agentic Era* — a hypothetical graduate course (the lovechild of MIT 6.5830, Harvard CS265, CMU 15-721, and Stanford CS245), preceded by field notes on what the real 2025–26 flagship courses actually teach. 14 weeks, 4 labs, 8 final projects, a synthesis exam.
 
+**The full course — [DATA 2027 course site](https://zozo123.github.io/databases-in-the-ai-era/course/):** the syllabus made real. Complete lecture notes for all 14 weeks (two lectures each, with figures, exercises, and readings) plus full handouts for the four systems labs (an LSM with vector segments, a mini-Neon branching layer, a text-to-SQL eval harness, a semantic-operator optimizer). Free for any CS student or instructor — CC BY 4.0.
+
 Researched by parallel AI agents (five for the essay, four for the syllabus), synthesized by one. All sources cited in the margins; vendor-reported figures flagged as such.
 
 Single HTML file, zero dependencies. Type: Fraunces / Newsreader / IBM Plex Mono.

@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lab 4: A Semantic-Operator Optimizer — DATA 2027</title>
+<meta name="description" content="Lab 4: build sem_filter, sem_join, and sem_topk with a tiered cost model and statistically calibrated cascades — beat the naive plan by 10× at ≤2% quality loss.">
+<meta name="theme-color" content="#f6f1e7">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23f6f1e7'/%3E%3Cellipse cx='50' cy='28' rx='30' ry='12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 28v44c0 6.6 13.4 12 30 12s30-5.4 30-12V28' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 50c0 6.6 13.4 12 30 12s30-5.4 30-12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500;9..144,600;9..144,900&amp;family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400;1,6..72,500&amp;family=IBM+Plex+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<link rel="stylesheet" href="course.css">
+</head>
+<body>
+
+<div class="masthead">
+  <span><a href="index.html">DATA 2027</a> <span class="dot">●</span> DATA SYSTEMS IN THE AGENTIC ERA</span>
+  <span><a href="index.html">← SCHEDULE</a></span>
+</div>
+
+<header class="page-head">
+  <div class="kicker">Lab 4 · Weeks 10–12</div>
+  <h1>A Semantic-Operator <em>Optimizer</em></h1>
+  <p class="standfirst">You will build three semantic operators over a Parquet corpus, then an optimizer that decides — per row — which model tier earns its tokens. The target is brutal and explicit: 10× cheaper than the naive plan, at most 2% quality loss.</p>
+  <div class="meta"><b>Due:</b> M1 — Fri wk 10 · M2 — Fri wk 11 · M3 + report — Fri wk 12 &nbsp;·&nbsp; <b>Weight:</b> 20% of course grade &nbsp;·&nbsp; <b>Teams:</b> 2 · Python ≥ 3.12</div>
+</header>
+
+<main>
+
+<section class="block">
+  <div class="objectives">
+    <div class="k">Learning objectives — after this lab you can…</div>
+    <ul>
+      <li>Specify semantic operators (<code>sem_filter</code>, <code>sem_join</code>, <code>sem_topk</code>) with precision/recall contracts rather than exact-answer semantics.</li>
+      <li>Build a per-operator cost model spanning model tiers and use it to price candidate plans before running them.</li>
+      <li>Calibrate a proxy-score cascade with a one-sided confidence bound, and explain why the guarantee holds.</li>
+      <li>Apply classical optimizer ideas — selectivity estimation, predicate reordering — when the “predicate” is a language-model call.</li>
+      <li>Report results as Pareto frontiers and ablation tables instead of single-point claims.</li>
+    </ul>
+  </div>
+</section>
+
+<section class="block">
+  <div class="sec-label">Overview</div>
+  <h2>What You’re Building</h2>
+  <p class="opener">Relational engines got fast because the optimizer, not the user, chose how to evaluate a query. Semantic query processing is at the pre-optimizer stage of that history: most pipelines today call a frontier model on every row, for every predicate, in whatever order the author happened to write them. This lab makes you build the missing layer. You will implement three semantic operators over a fixed corpus — 20,000 product reviews and 5,000 product descriptions in Parquet — and an optimizer that assigns each operator a model tier, a cascade configuration, and a position in the plan.</p>
+  <p>All model calls go through <code>llmsim</code>, a provided simulator with configurable, seeded error rates. There are no real API calls, no network, and no nondeterminism: given the same seed and the same plan, your pipeline must produce byte-identical output. This is what makes the lab gradable — and it is also a non-negotiable spec item (see the rubric’s reproducibility row).</p>
+  <p><strong>The benchmark query</strong>, fixed for everyone: <em>find the 25 products whose reviews most credibly complain about battery degradation, joining each complaint to the product whose description claims long battery life.</em> It decomposes into one <code>sem_filter</code> over reviews (P1: “complains about battery degradation”), one <code>sem_filter</code> over products (P2: “claims long battery life”), one <code>sem_join</code> (review discusses this product’s claim), and one <code>sem_topk</code> (k = 25, criterion “most credible complaint”).</p>
+  <p><strong>Target.</strong> The naive plan runs every call on the frontier tier in written order; the autograder prices it at <strong>$41.18</strong> on the benchmark seed. Your optimized plan must cost <strong>≤ $4.12</strong> while scoring within <strong>2% relative F1</strong> of the frozen gold standard for the filter/join stages and <strong>≥ 0.93 nDCG@25</strong> for the top-k stage.</p>
+  <h3>Non-goals and forbidden shortcuts</h3>
+  <ul>
+    <li><strong>No gold-standard mining.</strong> You may read <code>gold/calibration.parquet</code> (500 labeled rows) programmatically. Opening, grepping, or training against <code>gold/test.parquet</code> is an academic-integrity violation; the file ships encrypted and the autograder holds the key.</li>
+    <li><strong>No answer caching across seeds.</strong> Memoizing within one run is fine (and expected); persisting simulator outputs to disk and replaying them on graded seeds is not.</li>
+    <li><strong>No hand-tuned magic constants.</strong> Every threshold in your submitted plan must be produced by your calibration code from the calibration split. The grader re-runs calibration on a shifted split; hardcoded thresholds will visibly fail the guarantee check.</li>
+    <li><strong>No real LLMs.</strong> Importing any model client disqualifies the run. The point is the optimizer, not the model.</li>
+  </ul>
+</section>
+
+<section class="block">
+  <div class="sec-label">Provided materials</div>
+  <h2>The Starter Kit</h2>
+  <p>Clone <code>data2027/lab4-starter</code>. It contains the corpus, the simulator, conformance tests, and a reference naive plan. The two Parquet files have fixed schemas: <code>reviews.parquet</code> (20,000 rows: <code>review_id&nbsp;int64</code>, <code>product_id&nbsp;int64</code>, <code>stars&nbsp;int8</code>, <code>text&nbsp;utf8</code>) and <code>products.parquet</code> (5,000 rows: <code>product_id&nbsp;int64</code>, <code>title&nbsp;utf8</code>, <code>description&nbsp;utf8</code>, <code>category&nbsp;dictionary&lt;utf8&gt;</code>). Do not re-encode them; the grader checks schema fingerprints.</p>
+  <p>The simulator exposes two tiers plus a free proxy scorer. The proxy is an embedding-similarity heuristic: cheap, biased, and exactly the kind of signal a cascade is built to exploit. Its agreement with gold is roughly 80% on this corpus — useless as a final answer, valuable as a router.</p>
+  <pre><code># llmsim — provided; treat as a sealed service. Do not modify.
+from llmsim import Simulator, Tier
+
+sim = Simulator(seed=2027)                  # deterministic per (seed, tier, prompt)
+r = sim.call(tier=Tier.CHEAP,               # Tier.CHEAP | Tier.FRONTIER
+             prompt="PREDICATE: ...\nTEXT: ...\nAnswer yes or no.",
+             max_output_tokens=8)
+r.text, r.input_tokens, r.output_tokens     # billed exactly as counted
+
+s = sim.proxy_score(predicate, text)        # float in [0, 1] — costs $0
+
+# Operators YOU implement — semops/ops.py (signatures are frozen)
+def sem_filter(table: pa.Table, predicate: str, *, plan: Plan,
+               sim: Simulator) -&gt; pa.ChunkedArray      # bool mask, len == table
+def sem_join(left: pa.Table, right: pa.Table, predicate: str, *,
+             plan: Plan, sim: Simulator) -&gt; pa.Table   # cols: left_id, right_id
+def sem_topk(table: pa.Table, criterion: str, k: int, *,
+             plan: Plan, sim: Simulator) -&gt; pa.Table   # k rows, ranked
+
+# Plan file — plans/optimized.json (validated against plan.schema.json)
+{
+  "order": ["P2", "P1", "JOIN", "TOPK"],
+  "ops": {
+    "P1": {"op": "sem_filter", "tier": "cheap",
+           "cascade": {"tau_lo": 0.21, "tau_hi": 0.84, "delta": 0.05}},
+    "JOIN": {"op": "sem_join", "blocker": "proxy_top_m", "m": 8, ...}
+  }
+}</code></pre>
+  <p>Costs and latencies are part of the spec, not something you measure. Your cost model must reproduce the table below exactly; the autograder cross-checks your reported plan price against its own meter and rejects mismatches above 0.5%.</p>
+  <table>
+    <thead>
+      <tr><th>Tier</th><th>$ / 1k input tok</th><th>$ / 1k output tok</th><th>Latency / call</th><th>Seeded error rate</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>proxy_score</code></td><td>0.000</td><td>—</td><td>0.4 ms</td><td>~20% disagreement w/ gold</td></tr>
+      <tr><td><code>Tier.CHEAP</code></td><td>0.025</td><td>0.10</td><td>180 ms</td><td>8% flip, biased toward “yes”</td></tr>
+      <tr><td><code>Tier.FRONTIER</code></td><td>0.750</td><td>3.00</td><td>1,400 ms</td><td>1% flip, symmetric</td></tr>
+    </tbody>
+  </table>
+  <p>Latency matters only for the stretch metric (critical-path latency under 32-way concurrency, reported but lightly weighted). Dollars are the primary axis.</p>
+</section>
+
+<section class="block">
+  <div class="sec-label">Milestone 1 · due Friday, week 10</div>
+  <h2>Correct Operators, Naive Plan</h2>
+  <p>Implement all three operators so the conformance suite (<code>pytest tests/conformance</code>) passes under the all-frontier plan. Operator semantics are statistical contracts, frozen as follows. <code>sem_filter(T, p)</code> returns a boolean mask whose positives must achieve precision ≥ 0.95 and recall ≥ 0.90 against gold when run all-frontier. <code>sem_join(L, R, p)</code> returns the set of (left_id, right_id) pairs satisfying p; the naive implementation evaluates the full cross-product of surviving rows — that quadratic blowup is precisely what makes the naive plan cost $41. <code>sem_topk(T, c, k)</code> must return a full ranking of k rows; ties broken by ascending row id so output stays deterministic. Internally you may implement it as a tournament or pairwise-comparison sort, but the comparison count is billed like everything else.</p>
+  <p>Deliverable: green conformance run plus <code>results/m1.json</code> (the grader writes it) showing naive-plan cost within 0.5% of $41.18. Nothing clever yet — M1 is the control arm of every experiment you will run later.</p>
+</section>
+
+<section class="block">
+  <div class="sec-label">Milestone 2 · due Friday, week 11</div>
+  <h2>Cascades With a Guarantee</h2>
+  <p>A cascade routes each row by its free proxy score s(x): accept outright if s(x) ≥ τ<sub>hi</sub>, reject outright if s(x) ≤ τ<sub>lo</sub>, and escalate the uncertain middle band to a model tier (cheap first, frontier only on low-confidence disagreement). The entire trick is choosing τ<sub>hi</sub> and τ<sub>lo</sub> so that the shortcuts don’t silently wreck quality.</p>
+  <p>The statistics are simpler than they look, and you must implement them rather than eyeball thresholds. Take the m calibration rows with s(x) ≥ τ<sub>hi</sub> and compute p̂, the fraction the gold labels mark positive — that’s the observed precision of the “accept” shortcut. Because m is small, p̂ is noisy, so you don’t trust it directly: you use a one-sided lower confidence bound. With Hoeffding’s inequality the bound is p̂ − √(ln(1/δ) / 2m); with probability at least 1 − δ, the true precision is no lower than that. Your calibrator should sweep τ<sub>hi</sub> from strict to loose and pick the <em>loosest</em> threshold whose lower bound still clears the target (0.95) — loosest, because every additional accepted row is a model call you never pay for. Run the mirror-image procedure on τ<sub>lo</sub> against the recall target. Use δ = 0.05 per threshold. A Clopper–Pearson exact bound is accepted and slightly tighter; say which you used.</p>
+  <p>One subtlety the grader checks: the guarantee is only valid if calibration rows are an i.i.d. sample of the rows the cascade will route. Calibrate per predicate — a τ<sub>hi</sub> fitted on P1 (battery complaints) transfers terribly to P2 (marketing claims), and the “shifted split” re-run in the autograder will expose any cross-predicate reuse.</p>
+  <figure>
+    <svg viewBox="0 0 800 360" role="img" aria-label="Cascade routing diagram">
+      <defs>
+        <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="#93321b"/>
+        </marker>
+      </defs>
+      <g font-family="IBM Plex Mono, monospace" font-size="13" fill="#1d1a15">
+        <!-- input -->
+        <rect x="22" y="150" width="120" height="60" fill="none" stroke="#1d1a15" stroke-width="1.5"/>
+        <text x="82" y="176" text-anchor="middle">20k rows</text>
+        <text x="82" y="194" text-anchor="middle" font-size="11" fill="#837b6c">per predicate</text>
+        <!-- proxy -->
+        <rect x="200" y="150" width="170" height="60" fill="none" stroke="#1d1a15" stroke-width="1.5"/>
+        <text x="285" y="176" text-anchor="middle">proxy s(x)</text>
+        <text x="285" y="194" text-anchor="middle" font-size="11" fill="#837b6c">$0 · 0.4 ms</text>
+        <line x1="142" y1="180" x2="198" y2="180" stroke="#93321b" stroke-width="1.5" marker-end="url(#arr)"/>
+        <!-- accept -->
+        <rect x="450" y="28" width="170" height="56" fill="none" stroke="#93321b" stroke-width="2"/>
+        <text x="535" y="52" text-anchor="middle" fill="#93321b">ACCEPT</text>
+        <text x="535" y="70" text-anchor="middle" font-size="11">s ≥ τ_hi · no call</text>
+        <path d="M370 162 C 410 120, 410 70, 448 58" fill="none" stroke="#93321b" stroke-width="1.5" marker-end="url(#arr)"/>
+        <!-- reject -->
+        <rect x="450" y="276" width="170" height="56" fill="none" stroke="#93321b" stroke-width="2"/>
+        <text x="535" y="300" text-anchor="middle" fill="#93321b">REJECT</text>
+        <text x="535" y="318" text-anchor="middle" font-size="11">s ≤ τ_lo · no call</text>
+        <path d="M370 198 C 410 240, 410 290, 448 302" fill="none" stroke="#93321b" stroke-width="1.5" marker-end="url(#arr)"/>
+        <!-- cheap -->
+        <rect x="450" y="150" width="150" height="60" fill="none" stroke="#1d1a15" stroke-width="1.5"/>
+        <text x="525" y="176" text-anchor="middle">CHEAP tier</text>
+        <text x="525" y="194" text-anchor="middle" font-size="11" fill="#837b6c">τ_lo &lt; s &lt; τ_hi</text>
+        <line x1="370" y1="180" x2="448" y2="180" stroke="#93321b" stroke-width="1.5" marker-end="url(#arr)"/>
+        <!-- frontier -->
+        <rect x="660" y="150" width="120" height="60" fill="none" stroke="#1d1a15" stroke-width="1.5"/>
+        <text x="720" y="176" text-anchor="middle">FRONTIER</text>
+        <text x="720" y="194" text-anchor="middle" font-size="11" fill="#837b6c">last resort</text>
+        <line x1="600" y1="180" x2="658" y2="180" stroke="#93321b" stroke-width="1.5" marker-end="url(#arr)"/>
+        <text x="630" y="166" text-anchor="middle" font-size="11" fill="#93321b">low conf.</text>
+        <!-- calibration note -->
+        <text x="285" y="318" text-anchor="middle" font-size="11" fill="#837b6c">τ_lo, τ_hi from 500-row calibration split,</text>
+        <text x="285" y="336" text-anchor="middle" font-size="11" fill="#837b6c">Hoeffding lower bound, δ = 0.05</text>
+      </g>
+    </svg>
+    <figcaption>Fig. 1 — Cascade routing for one semantic predicate. The free proxy score splits rows into accept / reject / escalate bands; only the uncertain middle pays for tokens, and only its hardest residue reaches the frontier tier. Thresholds are chosen so the shortcuts hold precision ≥ 0.95 and recall ≥ 0.90 with probability ≥ 1 − δ.</figcaption>
+  </figure>
+  <p>For the join, the cross-product is the enemy: cascade thresholds alone won’t save you if you score 20,000 × 5,000 pairs. Use the proxy as a <em>blocker</em> — keep only each review’s top-m products by proxy score (m is a plan parameter; calibrate the recall loss it induces the same way you calibrate τ<sub>lo</sub>). Deliverable: <code>results/m2.json</code> with per-predicate thresholds, their lower bounds, and an empirical check that quality held on calibration.</p>
+  <div class="pull">The optimizer’s job is not to avoid the frontier model — it is to <b>spend it</b> only where it changes the answer.</div>
+</section>
+
+<section class="block">
+  <div class="sec-label">Milestone 3 · due Friday, week 12</div>
+  <h2>Reordering, Experiments, Report</h2>
+  <p>Now make it an optimizer. Your planner reads the operator DAG, estimates each predicate’s selectivity and per-row cost from a 200-row pilot sample (pilot calls are billed — budget for them), and emits the cheapest valid ordering. The classical rule survives translation: run the most selective, cheapest-per-row filter first. P2 runs over 5,000 products; P1 over 20,000 reviews; whether filtering products first shrinks the join enough to pay for itself is exactly the question your cost model must answer with numbers, not vibes.</p>
+  <p><strong>Required experiments</strong> — all on seeds {2027, 2028, 2029}, reporting mean and range:</p>
+  <ul>
+    <li><strong>E1 — naive:</strong> all-frontier, written order. Your control row.</li>
+    <li><strong>E2 — cascade:</strong> calibrated cascades, written order.</li>
+    <li><strong>E3 — cascade + reorder:</strong> the full optimizer, plus join blocking.</li>
+    <li><strong>E4 — Pareto sweep:</strong> vary δ ∈ {0.20, 0.10, 0.05, 0.01} and m ∈ {4, 8, 16}; plot cost (x, log scale) vs quality (y) and trace the frontier.</li>
+    <li><strong>E5 — ablation table:</strong> E3 with each mechanism removed one at a time (no cascade, no reorder, no blocking, no cheap tier), one row each: cost, F1, nDCG@25.</li>
+  </ul>
+  <p><strong>Report format</strong> (<code>report.pdf</code>, ≤ 4 pages, two columns fine): §1 plan diagram of your final E3 plan with tier and threshold annotations; §2 the E1–E3 cost/quality table; §3 the Pareto figure with your submitted operating point marked; §4 the ablation table plus one paragraph per row explaining the mechanism’s marginal contribution; §5 a short “where the guarantee leaks” discussion — every cascade has one, and finding yours is worth more than pretending it doesn’t exist. Submit the repo with <code>plans/optimized.json</code>, <code>results/</code>, and <code>report.pdf</code>; <code>make grade</code> must reproduce every number in the report.</p>
+</section>
+
+<section class="block">
+  <div class="sec-label">Grading rubric</div>
+  <h2>How the 100 Points Fall</h2>
+  <table>
+    <thead>
+      <tr><th>Component</th><th>Pts</th><th>What we check</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Operator correctness (M1)</td><td>20</td><td>Conformance suite green; all-frontier plan meets precision/recall contracts; naive cost within 0.5% of $41.18.</td></tr>
+      <tr><td>Cascade calibration (M2)</td><td>20</td><td>Thresholds derived from calibration code; lower bounds computed correctly; guarantee holds on the grader’s shifted split.</td></tr>
+      <tr><td>Optimizer &amp; target (M3)</td><td>20</td><td>≤ $4.12 at ≤ 2% F1 loss and ≥ 0.93 nDCG@25 on held-out seeds. Partial credit on a published sliding scale from 5× / 4%.</td></tr>
+      <tr><td>Experiments E1–E5</td><td>20</td><td>All five present, multi-seed, with ranges; Pareto frontier monotone-checked; ablations isolate one mechanism each.</td></tr>
+      <tr><td>Report</td><td>10</td><td>≤ 4 pages; every claim traceable to <code>results/</code>; honest §5 failure analysis.</td></tr>
+      <tr><td>Reproducibility &amp; code</td><td>10</td><td><code>make grade</code> reproduces all numbers byte-identically; no forbidden shortcuts; readable plan/calibration code.</td></tr>
+    </tbody>
+  </table>
+  <p>Late policy: 10 points per 24 h on the affected milestone, capped at 48 h. The quality threshold is a cliff, not a slope — a plan at 2.4% loss grades as a 5×-tier plan no matter how cheap it is. That asymmetry is deliberate; it is how production systems are judged too.</p>
+</section>
+
+<section class="block">
+  <div class="sec-label">Pitfalls</div>
+  <h2>Ways Previous Cohorts Lost Points</h2>
+  <div class="aside">
+    <span class="k">Pitfall · proxy bias</span>
+    The proxy is not uniformly wrong: it over-scores reviews that merely <em>mention</em> batteries without complaining, so a loose τ<sub>hi</sub> on P1 admits a correlated cluster of false positives that a random-error model never predicts. Your Hoeffding bound still holds — on calibration’s distribution. Inspect the proxy’s confusion by stars-bucket before trusting one global threshold; per-bucket thresholds are allowed and often worth half a point of F1.
+  </div>
+  <div class="aside">
+    <span class="k">Pitfall · gold-standard contamination</span>
+    Subtler than opening the test file: tuning δ, m, or the plan order by repeatedly submitting to the autograder and watching the held-out score is also contamination — you’re using the test set as a validation set, twenty bits at a time. You get five graded submissions total. Carve your own validation split out of calibration and develop against that.
+  </div>
+  <div class="aside">
+    <span class="k">Pitfall · billing the wrong thing</span>
+    Teams routinely forget that pilot-sample calls, top-k comparison calls, and frontier escalations inside the join all hit the meter. If your self-reported cost disagrees with the grader’s by more than 0.5%, the run is rejected outright — instrument <code>Simulator</code> usage through one accounting choke point, not ad-hoc counters in three modules.
+  </div>
+  <div class="aside">
+    <span class="k">Pitfall · seed leakage</span>
+    Deterministic ≠ seed-independent. If your threshold sweep ties and you break the tie using simulator outputs from the benchmark seed, your plan quietly overfits to seed 2027 and the 2028/2029 runs sag. Break ties with fixed lexicographic rules.
+  </div>
+</section>
+
+<section class="block">
+  <div class="sec-label">Checkpoint questions</div>
+  <h2>Answer Before You Submit</h2>
+  <p>Each checkpoint is a short written answer (≤ 200 words) in <code>CHECKPOINTS.md</code>, graded inside the report points. They exist to catch conceptual errors before the autograder does.</p>
+  <div class="exercise">
+    <div class="ex-head">Checkpoint 4.1 · the bound</div>
+    <div class="ex-body"><p>Your calibration split has m = 92 rows above a candidate τ<sub>hi</sub>, with p̂ = 0.978. Compute the Hoeffding lower bound at δ = 0.05. Does this threshold clear the 0.95 precision target? Now explain, in two sentences, why doubling the calibration sample is sometimes worth real simulator dollars — and what it would cost here given that calibration labels are free but proxy scores must still be computed.</p></div>
+  </div>
+  <div class="exercise">
+    <div class="ex-head">Checkpoint 4.2 · the ordering</div>
+    <div class="ex-body"><p>Suppose your pilot estimates: P1 selectivity 0.06 at $0.9/1k rows (cascaded), P2 selectivity 0.30 at $1.1/1k rows, and join cost proportional to |L′| × m. Using your cost model, derive which filter order is cheaper end-to-end and by how much. Then state one condition under which the classical “most selective first” heuristic gives the <em>wrong</em> answer for semantic predicates but never for boolean ones.</p></div>
+  </div>
+  <div class="exercise">
+    <div class="ex-head">Checkpoint 4.3 · the leak</div>
+    <div class="ex-body"><p>Your cascade guarantee is conditioned on calibration and deployment rows being exchangeable. Name the specific way the benchmark query breaks this for the <em>join</em> operator (hint: blocking changes which pairs the escalation tier ever sees), and propose a measurement — runnable inside your budget — that would detect the resulting quality drift without touching the test split.</p></div>
+  </div>
+  <div class="fleuron">❦</div>
+</section>
+
+<nav class="pager">
+  <a href="lab-3.html"><span class="dir">← Lab 3</span><span class="ttl">Lab 3</span></a>
+  <a class="next" href="index.html"><span class="dir">Course home →</span><span class="ttl">Course home</span></a>
+</nav>
+
+</main>
+
+<footer class="site">
+  <div class="inner">
+    <span>DATA 2027 — a course that doesn’t exist yet · <a href="../index.html">Essay № 01</a> · <a href="../course.html">Essay № 02</a></span>
+    <span>CC BY 4.0 · built with <a href="https://claude.com/claude-code">Claude Code</a></span>
+  </div>
+</footer>
+
+</body>
+</html>

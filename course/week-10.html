@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Week 10: Semantic Operators — DATA 2027</title>
+<meta name="description" content="LOTUS-style semantic operators as relational algebra over LLM calls; cascades with statistical guarantees; Palimpzest and DocETL optimization over a (cost, quality) Pareto frontier.">
+<meta name="theme-color" content="#f6f1e7">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23f6f1e7'/%3E%3Cellipse cx='50' cy='28' rx='30' ry='12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 28v44c0 6.6 13.4 12 30 12s30-5.4 30-12V28' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 50c0 6.6 13.4 12 30 12s30-5.4 30-12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500;9..144,600;9..144,900&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400;1,6..72,500&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="course.css">
+</head>
+<body>
+
+<div class="masthead">
+  <span><a href="index.html">DATA 2027</a> <span class="dot">●</span> DATA SYSTEMS IN THE AGENTIC ERA</span>
+  <span><a href="index.html">← SCHEDULE</a></span>
+</div>
+
+<header class="page-head">
+  <div class="kicker">Week 10 · Part III — Semantics, Agents, Governance</div>
+  <h1>Semantic <em>Operators</em></h1>
+  <p class="standfirst">For fifty years a filter predicate was a boolean expression a CPU could evaluate in nanoseconds for free. This week the predicate becomes English, the evaluator becomes a language model, and the optimizer has to reason about plans that cost dollars and are sometimes wrong.</p>
+  <div class="meta"><b>Lectures:</b> Tue — sem_filter, sem_join: relational algebra meets the model · Thu — Optimizing pipelines that cost dollars and lie &nbsp;·&nbsp; <b>Lab:</b> Fri — Build a guaranteed sem_filter cascade over the arXiv abstracts corpus</div>
+</header>
+
+<main>
+
+<section class="block">
+  <div class="objectives">
+    <div class="k">Learning objectives — after this week you can…</div>
+    <ul>
+      <li>Define sem_filter, sem_join, sem_agg, and sem_topk as relational operators with LLM-backed implementations, and state precisely what their output contract guarantees (and doesn’t).</li>
+      <li>Explain why a naive sem_join is O(n·m) model calls, and design a proxy→oracle cascade that cuts cost by 10–100× while meeting a precision/recall target with probability 1−δ.</li>
+      <li>Compute the dollar cost of a semantic pipeline from first principles: tokens per call × calls per operator × price per token — before running it.</li>
+      <li>Describe Palimpzest’s physical plan space (model tiers, prompt strategies, operator fusion, code synthesis) and why plan quality is a first-class optimization axis.</li>
+      <li>Prove to yourself why System R’s dynamic programming breaks under a (cost, accuracy) partial order, and explain Pareto-frontier plan enumeration as the repair.</li>
+    </ul>
+  </div>
+</section>
+
+<section class="block">
+  <div class="sec-label">Lecture 1 · Tuesday</div>
+  <h2>sem_filter, sem_join: relational algebra meets the model</h2>
+
+  <p class="opener">Relational algebra survived every hardware revolution since 1970 because it separates <em>what</em> from <em>how</em>. Codd’s operators don’t care whether the executor is a PDP-11 or a thousand-node cluster. The LOTUS line of work (Patel et al., VLDB 2025) makes a bet that should feel inevitable by Week 10 of this course: the same separation works when the predicate is written in English and the evaluator is a language model. A <strong>semantic operator</strong> is a declarative transformation over relations, parameterized by a natural-language expression, whose physical implementation happens to involve one or more LLM invocations. The crucial move is that the operator’s <em>semantics</em> are defined independently of any particular model — defined, instead, against a reference judgment (a “gold” oracle, in practice a frontier model or a human) plus a statistical accuracy target. Once you have that, the entire apparatus of database optimization — logical rewrites, physical operator selection, cost models, cardinality estimation — comes back online. That’s the whole lecture in one sentence; the rest is the details, and the details have teeth.</p>
+
+  <h3>The operator zoo, precisely</h3>
+  <p>Four operators carry most of the weight. <code>sem_filter(R, p)</code> takes a relation and a natural-language predicate (“this abstract claims a new state-of-the-art result”) and returns the tuples for which the predicate holds, where “holds” means: agrees with the reference judgment at a target accuracy. <code>sem_join(R, S, p)</code> returns pairs (r, s) satisfying a language predicate over both tuples — “this paper r addresses dataset s.” <code>sem_agg(R, q)</code> is a many-to-one reduction: summarize, synthesize, or answer q over a group of tuples, typically implemented as a fold or hierarchical tree of model calls because the group rarely fits one context window. <code>sem_topk(R, q, k)</code> ranks tuples by a language criterion (“most novel methodology”) and returns the top k — implemented not by scoring each tuple independently (LLMs are miscalibrated absolute scorers) but by pairwise or listwise comparisons fed into a sorting or tournament network, which is why its call complexity looks like O(n log n) comparisons rather than O(n) scores.</p>
+  <p>Notice what is <em>not</em> in the contract: determinism. Run a sem_filter twice and you may get different rows. The honest semantics are probabilistic: the output is a sample from a distribution over relations, and the guarantee is about expected agreement with the reference. This is genuinely new for the relational world — even our flakiest Week 4 friends (eventual consistency, anyone?) eventually converged to a unique value. Semantic operators never promise that. What they promise instead is bounded disagreement, and Tuesday’s second half is about how to make that bound real rather than aspirational.</p>
+
+  <h3>A pipeline you can actually write</h3>
+  <p>Here is a LOTUS-style pipeline in the Pandas-flavored API the paper popularized. The task: from a corpus of ML papers, find ones claiming reproducible results, match each against a relation of known benchmark datasets, and produce a ranked digest per dataset. Curly braces splice column values into the prompt:</p>
+<pre><code>papers = pd.read_parquet("arxiv_ml_2025.parquet")      # 10,000 rows
+datasets = pd.read_parquet("benchmarks.parquet")        #    500 rows
+
+claims = papers.sem_filter(
+    "the abstract {abstract} explicitly claims results "
+    "that are reproducible with released code"
+)                                                       # ~1,800 survive
+
+matched = claims.sem_join(
+    datasets,
+    "paper {abstract:left} reports results on the "
+    "benchmark {name:right} ({description:right})"
+)                                                       # 1,800 × 500 pairs?!
+
+digest = (matched
+    .sem_topk("most rigorous experimental methodology",
+              K=5, group_by=["name"])
+    .sem_agg("write a 3-sentence reproducibility summary "
+             "of these papers for dataset {name}",
+             group_by=["name"]))</code></pre>
+  <p>Read the comment on line 11 again. That sem_join, executed naively, is 1,800 × 500 = 900,000 model calls. At roughly 500 input tokens per pair (two text fields plus instructions) and frontier pricing of $3 per million input tokens plus a few output tokens per verdict, you are staring at about <strong>$1,400 and several GPU-days of latency for one join</strong>. Joins are quadratic; model calls are five to nine orders of magnitude more expensive than the predicate evaluations Selinger budgeted at fractions of a microsecond. The algebra transplanted fine. The cost model did not.</p>
+
+  <h3>Cascades: cheap models propose, expensive models dispose</h3>
+  <p>The standard repair is the <strong>model cascade</strong>, and it is older than LLMs — Viola–Jones face detection (2001) was a cascade; so was every multi-stage ranker at a search company. The structure: a cheap <em>proxy</em> scores every candidate; we pick two thresholds τ⁻ &lt; τ⁺; candidates scoring below τ⁻ are rejected outright, above τ⁺ accepted outright, and only the uncertain middle band is sent to the expensive <em>oracle</em> model. For sem_filter the proxy is a small instruction-tuned model’s token log-probability on “True.” For sem_join it is even cheaper: embed both sides once (O(n+m) embedding calls, not O(n·m)) and use cosine similarity as the proxy score over all pairs.</p>
+
+  <figure>
+    <svg viewBox="0 0 800 360" role="img" aria-label="Cascade architecture: candidate pairs flow through a proxy scorer and split into reject, oracle, and accept paths based on two thresholds">
+      <rect x="0" y="0" width="800" height="360" fill="#efe8d8"/>
+      <!-- candidates box -->
+      <rect x="28" y="140" width="158" height="80" fill="none" stroke="#1d1a15" stroke-width="2.5" rx="3"/>
+      <text x="107" y="174" font-family="monospace" font-size="14" fill="#1d1a15" text-anchor="middle">n &#215; m</text>
+      <text x="107" y="196" font-family="monospace" font-size="14" fill="#1d1a15" text-anchor="middle">candidate pairs</text>
+      <!-- arrow to proxy -->
+      <path d="M186 180 L246 180" stroke="#1d1a15" stroke-width="2.5" fill="none"/>
+      <path d="M238 174 L250 180 L238 186" stroke="#1d1a15" stroke-width="2.5" fill="none"/>
+      <!-- proxy box -->
+      <rect x="252" y="132" width="180" height="96" fill="none" stroke="#93321b" stroke-width="3" rx="3"/>
+      <text x="342" y="168" font-family="monospace" font-size="14" fill="#93321b" text-anchor="middle">PROXY</text>
+      <text x="342" y="190" font-family="monospace" font-size="13" fill="#1d1a15" text-anchor="middle">cosine(e_r, e_s)</text>
+      <text x="342" y="210" font-family="monospace" font-size="13" fill="#1d1a15" text-anchor="middle">~$0.04 total</text>
+      <!-- three branches -->
+      <path d="M432 156 C500 110, 540 86, 596 70" stroke="#1d1a15" stroke-width="2.5" fill="none"/>
+      <path d="M585 67 L600 69 L590 80" stroke="#1d1a15" stroke-width="2.5" fill="none"/>
+      <text x="500" y="92" font-family="monospace" font-size="13" fill="#1d1a15">s &gt; &#964;&#8314;</text>
+      <path d="M432 180 L596 180" stroke="#93321b" stroke-width="2.5" fill="none"/>
+      <path d="M588 174 L600 180 L588 186" stroke="#93321b" stroke-width="2.5" fill="none"/>
+      <text x="478" y="170" font-family="monospace" font-size="13" fill="#93321b">&#964;&#8315; &#8804; s &#8804; &#964;&#8314;</text>
+      <path d="M432 204 C500 250, 540 274, 596 290" stroke="#1d1a15" stroke-width="2.5" fill="none"/>
+      <path d="M590 280 L600 291 L585 293" stroke="#1d1a15" stroke-width="2.5" fill="none"/>
+      <text x="500" y="278" font-family="monospace" font-size="13" fill="#1d1a15">s &lt; &#964;&#8315;</text>
+      <!-- accept box -->
+      <rect x="604" y="40" width="168" height="56" fill="none" stroke="#1d1a15" stroke-width="2.5" rx="3"/>
+      <text x="688" y="74" font-family="monospace" font-size="14" fill="#1d1a15" text-anchor="middle">ACCEPT (free)</text>
+      <!-- oracle box -->
+      <rect x="604" y="148" width="168" height="64" fill="none" stroke="#93321b" stroke-width="3" rx="3"/>
+      <text x="688" y="176" font-family="monospace" font-size="14" fill="#93321b" text-anchor="middle">ORACLE LLM</text>
+      <text x="688" y="198" font-family="monospace" font-size="13" fill="#1d1a15" text-anchor="middle">~2% of pairs</text>
+      <!-- reject box -->
+      <rect x="604" y="264" width="168" height="56" fill="none" stroke="#1d1a15" stroke-width="2.5" rx="3"/>
+      <text x="688" y="298" font-family="monospace" font-size="14" fill="#1d1a15" text-anchor="middle">REJECT (free)</text>
+      <!-- threshold note -->
+      <text x="40" y="320" font-family="monospace" font-size="13" fill="#93321b">&#964;&#8315;, &#964;&#8314; chosen on a labeled sample so that</text>
+      <text x="40" y="340" font-family="monospace" font-size="13" fill="#1d1a15">P(precision &#8805; p* and recall &#8805; r*) &#8805; 1 &#8722; &#948;</text>
+    </svg>
+    <figcaption>Fig. 10.1 — A sem_join cascade. The proxy (embedding cosine similarity) scores all n×m pairs for pennies; only the uncertain band between τ⁻ and τ⁺ pays for a frontier-model verdict. The thresholds are not vibes: they are calibrated on an oracle-labeled sample to meet a precision/recall target with confidence 1−δ.</figcaption>
+  </figure>
+
+  <p>The thresholds are where the statistics earn their keep. LOTUS inherits the SUPG recipe (Kang et al.): draw a sample of candidates, label them with the oracle, and use the sample to pick τ⁻ and τ⁺ such that, with probability at least 1−δ over the sampling randomness, the cascade’s output achieves recall ≥ r* (no more than a bounded fraction of true pairs auto-rejected below τ⁻) and precision ≥ p* (auto-accepts above τ⁺ are sufficiently pure). Importance-weighted sampling concentrates labels near the decision boundary where they matter. The result is a knob you can write into an SLA: <em>“this join agrees with GPT-class judgment at 90% recall, 95% confidence,”</em> with the residual risk quantified rather than vibed. If the proxy is garbage — uncorrelated with the oracle — the procedure degrades gracefully: the uncertain band widens until you’re paying the oracle for everything, which is the naive plan. You never silently get worse answers; you pay more money. That failure direction is a design choice and the correct one.</p>
+
+  <h3>The worked numbers</h3>
+  <p>Let’s cost the join from the code block honestly. <strong>Naive plan:</strong> 1,800 × 500 = 900,000 pairs × ~500 input tokens = 450M tokens at $3/M → $1,350, plus ~$45 of output tokens. Call it <strong>$1,400</strong>. <strong>Cascade plan:</strong> embed 1,800 abstracts and 500 descriptions at ~250 tokens each ≈ 575K tokens at $0.02/M → <strong>$0.012</strong> (effectively free). Oracle-label a calibration sample of 1,000 pairs → $1.55. Suppose calibration sets thresholds such that 97.8% of pairs fall outside [τ⁻, τ⁺] — realistic, because almost all of the 900K pairs are obvious non-matches — leaving ~20,000 uncertain pairs for the oracle: 20,000 × 500 tokens × $3/M ≈ <strong>$30</strong>. Total ≈ <strong>$32 against $1,400: a 44× reduction</strong>, with a certified recall floor. And note the asymmetry of where time went: the embedding pass is two batched calls; the oracle pass parallelizes to whatever rate limit you can buy. Latency drops from days to minutes. This single pattern — cheap scan, calibrated thresholds, expensive verification on the margin — is to semantic query processing what the B-tree was to Week 2: the default you must justify deviating from.</p>
+
+  <div class="aside">
+    <span class="k">Field note</span>
+    A team I advised ran an uncascaded sem_join between a 40K-row support-ticket table and an 800-row known-issues table as an overnight batch job — “it’s just a join.” Thirty-two million model calls later, the bill was $19,000 and the rate limiter had stretched “overnight” to four days. The fix took an afternoon: embeddings plus a 3%-band oracle pass brought the rerun to $410. Nobody on that team had read Selinger; everybody now has. Quadratic operators stop being an abstraction the moment each evaluation has a unit price printed on it.
+  </div>
+</section>
+
+<section class="block">
+  <div class="sec-label">Lecture 2 · Thursday</div>
+  <h2>Optimizing pipelines that cost dollars and lie</h2>
+
+  <p class="opener">Tuesday gave us an algebra and one heroic physical optimization. Thursday asks the System R question: who picks the plan? In 1979 the answer was a dynamic program over join orders minimizing a scalar cost. In 2025 the answer cannot be that, because semantic plans vary along three axes at once — runtime, dollars, and <em>quality</em> — and quality is not something you can buy back after the fact the way you can re-sort a mis-ordered intermediate. Palimpzest (Liu, Russo et al., CIDR 2025) is the cleanest statement of the new problem: the user declares a pipeline and a policy (“maximize quality subject to cost ≤ $50,” or “minimize cost subject to quality ≥ 0.9 of the reference plan”), and the optimizer searches a space of physical plans whose points are scattered across a three-dimensional Pareto surface. The deep lesson of the lecture is structural: when plan goodness is a partial order, the optimal-substructure assumption underneath forty-five years of query optimization quietly fails, and we have to reach for machinery the community built decades ago for a problem almost nobody had — until now.</p>
+
+  <h3>The physical plan space is the model menu</h3>
+  <p>What is a “physical operator” when the logical operator is sem_filter? Palimpzest’s answer: every concrete way of getting the judgment. The same logical filter can be implemented by a frontier model with chain-of-thought; a mid-tier model with a terse prompt; a small local model; an embedding-similarity proxy with calibrated thresholds (Tuesday’s cascade is just one physical operator here!); a fused prompt that evaluates three adjacent filters in one call to amortize the per-call token overhead; or — Palimpzest’s slyest trick — <em>synthesized code</em>: ask a frontier model once to write a Python function that approximates the predicate, then run that function for free on every row. Each choice lands at a different (runtime, cost, quality) point. A taste of the menu for one filter over 10,000 documents:</p>
+
+  <table>
+    <thead>
+      <tr><th>Physical implementation</th><th>Cost (10K rows)</th><th>Latency</th><th>Quality (vs. reference)</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Frontier model, chain-of-thought</td><td>~$95</td><td>hours (rate-limited)</td><td>1.00 (is the reference)</td></tr>
+      <tr><td>Mid-tier model, terse prompt</td><td>~$6</td><td>~20 min</td><td>0.93</td></tr>
+      <tr><td>Cascade: embedding proxy → frontier on 3% band</td><td>~$3.20</td><td>~10 min</td><td>0.95 (certified floor 0.90)</td></tr>
+      <tr><td>Three filters fused into one mid-tier call</td><td>~$2.50/filter</td><td>~20 min</td><td>0.88 (interference between criteria)</td></tr>
+      <tr><td>Code synthesis: one frontier call writes a classifier fn</td><td>~$0.40 total</td><td>seconds</td><td>0.71 (great on lexical predicates, bad on judgment)</td></tr>
+    </tbody>
+  </table>
+
+  <p>No row dominates. That non-domination is the whole story: the optimizer can’t collapse this table to a single number without asking the user what they value, which is exactly why Palimpzest makes the policy part of the query.</p>
+
+  <h3>Why System R’s dynamic programming breaks</h3>
+  <p>Selinger-style optimization rests on the principle of optimality: the best plan for joining {A,B,C} extends the best plan for some sub-join, so you can memoize one winner per subexpression and prune everything else. That works because scalar costs are <em>totally ordered</em> — “best” is well-defined and composition is monotone. Under a (cost, accuracy) objective, goodness is a <strong>partial order</strong>: plan P dominates Q only if P is no worse on every axis and strictly better on one. Two subplans where one is cheaper and the other more accurate are incomparable, and — here is the killer — the cheap-but-sloppy subplan may be the prefix of the globally best full plan, because a downstream operator might tolerate (or even mask) its errors, while the accurate-but-pricey subplan blows the budget. Prune it at the memo table and you’ve thrown away the optimum. The repair is to memoize the full <strong>Pareto frontier</strong> of undominated subplans at each node and compose frontiers, pruning only dominated points. You’ve seen a baby version of this: Selinger’s own “interesting orders” keeps multiple plans per subexpression because sortedness can pay off later. Pareto enumeration is interesting orders with the dial turned to eleven — and the frontier can grow multiplicatively with pipeline depth, so real systems (Palimpzest included) approximate: sample-based quality estimation on a small labeled prefix of the data, frontier sparsification, and confidence-interval pruning à la multi-armed bandits to stop spending estimation budget on plans that are probably dominated.</p>
+
+  <div class="aside">
+    <span class="k">Historical aside</span>
+    The theory was waiting for us. Ganguly, Hasan and Krishnamurthy formalized parametric query optimization in 1992; Papadimitriou and Yannakakis gave multi-objective query optimization its complexity-theoretic teeth in 2001, including the result that Pareto frontiers can be exponentially large but admit polynomial ε-approximations. For thirty years this was a beautiful answer in search of a question — optimizers shipped with one cost number because users wanted one plan. It took predicates with API bills and error bars to make multi-objective optimization the load-bearing wall of a CIDR paper. Old theory doesn’t die; it waits for its workload.
+  </div>
+
+  <h3>Estimating quality: the cardinality estimation of our era</h3>
+  <p>A cost model needs statistics. System R had histograms; what does Palimpzest have? Nothing ahead of time — there is no precomputed histogram for “fraction of abstracts a mid-tier model misjudges on this predicate.” So quality estimation is <em>online and sampled</em>: run candidate physical operators on a small sample, score them against the champion (frontier) implementation as pseudo-ground-truth, and propagate estimated selectivities and quality through the plan DAG. Every pathology you learned in Week 5 returns wearing a new coat: errors compound multiplicatively across operators; correlated predicates wreck independence assumptions; and the estimates themselves now cost money, so the optimizer faces an explore/exploit problem — every sample spent evaluating a doomed plan is budget stolen from running the good one. If you remember one structural fact from Thursday, make it this: <strong>quality estimation is to semantic optimizers what cardinality estimation was to relational ones — the perpetually weakest input, and the place where the next decade of papers will live.</strong></p>
+
+  <h3>DocETL: when the right plan needs a different query</h3>
+  <p>Palimpzest holds the logical plan fixed and shops for physical operators. DocETL (Shankar et al., VLDB 2025) makes a more radical observation about document pipelines: often <em>every</em> physical implementation of your logical plan is bad, because the logical operator itself is too big for a model to execute faithfully — “extract all medication mentions with dosage from this 80-page medical record” fails not on model choice but on attention over long context. DocETL’s optimizer is <strong>agentic</strong>: an LLM proposes rewrites of the pipeline using a library of directives — split a document into chunks and gather peripheral context around each; decompose one mega-map into a chain of smaller maps; insert a deduplicating resolve before an aggregation — and a second LLM-as-judge evaluates candidate rewrites on sampled data to decide whether the rewrite actually improved output quality. This should make you pleasantly uneasy: the optimizer is using the unreliable substrate to repair plans over the unreliable substrate, with sampling and validation as the only adult supervision. It works — 1.34× to 4.6× quality improvements on their benchmarks — precisely because evaluation-on-a-sample is cheaper and more reliable than generation-in-the-large. Verification being easier than synthesis is the oldest trick in computer science; semantic data systems run almost entirely on it.</p>
+
+  <div class="pull">A query plan used to be a route to the one right answer. Now it’s a <b>position you take</b> on a frontier of dollars, hours, and truth.</div>
+
+  <p>Where does this leave the classical picture? Intact in shape, transformed in content. We still have declarative queries, logical/physical separation, cost-based search, statistics, and a healthy fear of cross products. What changed is the unit of cost (microseconds → dollars), the contract of correctness (exact → bounded-error), and the order structure of “better” (total → partial). The physics held; the workload moved. Next week we point these operators at a stranger target: the agent’s own memory.</p>
+</section>
+
+<section class="block">
+  <div class="sec-label">Readings</div>
+  <h2>Read Before Thursday</h2>
+  <div class="reads-block">
+    <div class="read-row"><div class="n">1</div><div class="t"><i>Semantic Operators: A Declarative Model for Rich, AI-Based Data Processing (LOTUS)</i> — Patel, Jha, Asawa, Pan, Guestrin, Zaharia, VLDB 2025.<span class="v">The algebra itself. Focus on the formal semantics of accuracy targets and the cascade algorithms for sem_filter/sem_join — especially how thresholds are calibrated to give statistical guarantees, not vibes.</span></div></div>
+    <div class="read-row"><div class="n">2</div><div class="t"><i>Palimpzest: Optimizing AI-Powered Analytics with Declarative Query Processing</i> — Liu, Russo, Cafarella et al., CIDR 2025.<span class="v">The optimizer story. Focus on the physical plan space (model tiers, fusion, code synthesis) and how plan search handles the (runtime, cost, quality) Pareto frontier; skim the implementation section.</span></div></div>
+    <div class="read-row"><div class="n">3</div><div class="t"><i>DocETL: Agentic Query Rewriting and Evaluation for Complex Document Processing</i> — Shankar, Parameswaran, Wu, VLDB 2025.<span class="v">Optimization beyond physical operator choice. Focus on the rewrite directives and on how LLM-as-judge validates rewrites — ask yourself where this validation loop could be fooled.</span></div></div>
+  </div>
+</section>
+
+<section class="block">
+  <div class="sec-label">Exercises</div>
+  <h2>This Week’s Problems</h2>
+  <div class="exercise">
+    <div class="ex-head">Exercise 10.1 · warm-up</div>
+    <div class="ex-body"><p>Cost out a sem_join between a 25,000-row product-review table and a 1,200-row defect-taxonomy table. Assume 600 input tokens per pair, $3/M input tokens for the oracle, $0.02/M for embeddings (300 tokens per row), and a cascade whose uncertain band is 1.5% of pairs after a 2,000-pair calibration sample. Compute: (a) the naive plan’s dollar cost; (b) the cascade’s total cost including calibration; (c) the band width (as a percentage of pairs) at which the cascade stops being cheaper than the naive plan. State every assumption you add.</p></div>
+  </div>
+  <div class="exercise">
+    <div class="ex-head">Exercise 10.2 · core</div>
+    <div class="ex-body"><p>Implement <code>sem_filter</code> with a calibrated cascade over the 5,000-abstract sample corpus from the course bucket, predicate: “this abstract proposes a new benchmark or dataset.” Use any embedding model as proxy and any frontier model as oracle. Following the SUPG recipe, label a 400-item importance-weighted sample, choose τ⁻ and τ⁺ to target recall ≥ 0.9 at δ = 0.05, then evaluate on a held-out 500-item oracle-labeled test set. Report: realized precision/recall, fraction of items routed to the oracle, total dollar cost, and a plot of cost versus target recall for r* ∈ {0.8, 0.9, 0.95, 0.99}. Explain the shape of that curve.</p></div>
+  </div>
+  <div class="exercise">
+    <div class="ex-head">Exercise 10.3 · stretch</div>
+    <div class="ex-body"><p>System R memoizes one optimal plan per subexpression; Pareto enumeration memoizes a frontier, which can grow multiplicatively with pipeline depth. Design and analyze a plan-enumeration algorithm for linear semantic pipelines of k operators, each with c physical implementations, that maintains at most B frontier points per memo entry via ε-dominance sparsification (P ε-dominates Q if P is within (1+ε) of Q on cost and at least Q’s quality). Prove a bound on how far your returned plan can be from the true Pareto frontier as a function of ε, k, and B — note that quality estimates carry sampling error, so your bound must hold with probability 1−δ given n-sample quality estimates per operator. Then either (a) show your bound is tight via an adversarial pipeline construction, or (b) implement the enumerator over the Lecture 2 table’s operator menu extended to k = 6 and measure realized regret against exhaustive enumeration. This is an open-flavored problem; partial rigor with honest gaps beats false completeness.</p></div>
+  </div>
+  <div class="fleuron">❦</div>
+</section>
+
+<nav class="pager">
+  <a href="week-09.html"><span class="dir">← Week 09</span><span class="ttl">Text-to-SQL Is Not Solved; It’s Specified</span></a>
+  <a class="next" href="week-11.html"><span class="dir">Week 11 →</span><span class="ttl">Memory Is a Database Problem</span></a>
+</nav>
+
+</main>
+
+<footer class="site">
+  <div class="inner">
+    <span>DATA 2027 — a course that doesn’t exist yet · <a href="../index.html">Essay № 01</a> · <a href="../course.html">Essay № 02</a></span>
+    <span>CC BY 4.0 · built with <a href="https://claude.com/claude-code">Claude Code</a></span>
+  </div>
+</footer>
+
+</body>
+</html>

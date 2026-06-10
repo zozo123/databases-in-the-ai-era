@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lab 3: Text-to-SQL Agent + Eval Harness — DATA 2027</title>
+<meta name="description" content="Build an analytics agent over a 200-table enterprise schema, a BIRD-style eval set with a pinned-snapshot grader, and a semantic layer — then reproduce the 21→95 curve in miniature.">
+<meta name="theme-color" content="#f6f1e7">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23f6f1e7'/%3E%3Cellipse cx='50' cy='28' rx='30' ry='12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 28v44c0 6.6 13.4 12 30 12s30-5.4 30-12V28' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 50c0 6.6 13.4 12 30 12s30-5.4 30-12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500;9..144,600;9..144,900&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400;1,6..72,500&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="course.css">
+</head>
+<body>
+
+<div class="masthead">
+  <span><a href="index.html">DATA 2027</a> <span class="dot">●</span> DATA SYSTEMS IN THE AGENTIC ERA</span>
+  <span><a href="index.html">← SCHEDULE</a></span>
+</div>
+
+<header class="page-head">
+  <div class="kicker">Lab 3 · Weeks 9–10</div>
+  <h1>Text-to-SQL Agent + Eval <em>Harness</em></h1>
+  <p class="standfirst">You will build an analytics agent over a deliberately hostile 200-table enterprise schema — and, more importantly, the evaluation harness that tells you whether it actually works. The agent is half the lab; the measurement is the other half.</p>
+  <div class="meta"><b>Due:</b> Fri Week 10, 23:59 · <b>Weight:</b> 20% of course grade · <b>Teams:</b> pairs &nbsp;·&nbsp; <b>Submit:</b> Git tag <code>lab3-final</code> + <code>report/ablation.md</code></div>
+</header>
+
+<main>
+
+<section class="block">
+  <div class="sec-label">Overview</div>
+  <h2>Overview &amp; Goals</h2>
+  <div class="objectives">
+    <div class="k">Learning objectives — after this lab you can…</div>
+    <ul>
+      <li>Design a BIRD-style evaluation set whose questions exercise real enterprise ambiguity, not toy joins.</li>
+      <li>Implement an execution-accuracy grader over a pinned data snapshot, and defend it against false positives.</li>
+      <li>Build an agent loop with schema retrieval, SQL generation, and self-checking repair under explicit token and call budgets.</li>
+      <li>Author a Cube-style semantic layer and quantify exactly how much accuracy each of its ingredients buys.</li>
+      <li>Report results as ablation tables broken down by error class, instead of a single headline number.</li>
+    </ul>
+  </div>
+  <p class="opener">In Week 9 lecture we traced the now-famous curve: a raw LLM pointed at an enterprise warehouse answers roughly 21% of analyst questions correctly, and a system wrapped in retrieval, a semantic layer, and self-checking execution reaches roughly 95% on the same questions. Vendors show you the endpoints. This lab makes you build the whole curve — every intermediate point, with your own grader, on a schema we have salted with the same traps that make real warehouses hostile: redundant metrics, contested definitions, and dead tables nobody deleted.</p>
+  <p>The deliverable is not “an agent.” It is a measured system: a 50-question eval set with gold SQL and gold answers, a grader you have stress-tested, an agent you can ablate, and a table that says — per error class — what each component is worth. We grade the table, not the demo.</p>
+  <div class="pull">Vendors show you the <b>endpoints</b> of the curve. You will build every point in between.</div>
+  <h3>Non-goals &amp; forbidden shortcuts</h3>
+  <ul>
+    <li><strong>No fine-tuning.</strong> You use the course-pinned model via the proxy (<code>DATA2027_LLM_BASE_URL</code>), temperature 0, fixed seed. The lab is about systems around the model, not the model.</li>
+    <li><strong>No gold SQL anywhere near the agent.</strong> Gold queries may not appear in prompts, retrieval corpora, few-shot examples, or the semantic layer. Automated leakage checks run at grading time (see Pitfalls).</li>
+    <li><strong>No per-question hints.</strong> The semantic layer must be written against the <em>schema</em>, not against your 50 questions. If a YAML entry quotes question text, it is leakage.</li>
+    <li><strong>No string-matching graders.</strong> SQL text equality and fuzzy SQL similarity are both forbidden as correctness signals. Execution accuracy only.</li>
+    <li><strong>No schema edits.</strong> The snapshot is read-only; its SHA-256 is pinned in <code>MANIFEST</code>. Creating views inside your own session is allowed; persisting them is not.</li>
+  </ul>
+</section>
+
+<section class="block">
+  <div class="sec-label">Provided materials</div>
+  <h2>The Warehouse You Are Given</h2>
+  <p>You receive a snapshot of the data warehouse of <em>Cordovan Retail Co.</em>, a synthetic mid-size retailer: 200 tables across the schemas <code>finance</code>, <code>orders</code>, <code>returns</code>, <code>marketing</code>, <code>analytics</code>, and a legacy area. The data is synthetic but the dysfunction is faithfully reproduced. Three traps are documented here because every real warehouse has them; finding the rest is part of the lab.</p>
+  <ul>
+    <li><strong>Three revenue variants.</strong> <code>orders.order_lines.line_amount</code> is gross and includes cancelled orders; <code>finance.revenue_recognized</code> is accrual-based and lags shipment by up to 30 days; <code>analytics.v_net_revenue</code> is gross minus returns and is the canonical definition for almost all reporting questions. A naive agent picks whichever it retrieves first.</li>
+    <li><strong>Two definitions of “active user.”</strong> <code>marketing.active_users_30d</code> counts any tracked event in a 30-day window; finance defines an active user as one with ≥1 completed order in 30 days. Both are legitimate. Questions that say “active users” without qualification are answerable only with a stated definition — your semantic layer must pick one and say so.</li>
+    <li><strong>Deprecated tables left in place.</strong> The <code>orders_v1.*</code> schema and <code>dim_customer_legacy</code> (41 tables in total) were frozen on 2024-06-30 and never dropped. They have plausible names, no FK constraints, and silently stale data. Any query touching them after that date is wrong by construction.</li>
+  </ul>
+  <table>
+    <thead><tr><th>File</th><th>What it is</th><th>You may modify?</th></tr></thead>
+    <tbody>
+      <tr><td><code>warehouse.duckdb</code></td><td>Pinned snapshot, logical date frozen at <strong>2025-11-30</strong>; SHA-256 in <code>MANIFEST</code></td><td>No — read-only</td></tr>
+      <tr><td><code>schema_catalog.json</code></td><td>All 200 tables: columns, types, row counts, free-text comments (some comments are stale on purpose)</td><td>No</td></tr>
+      <tr><td><code>grader/grade.py</code></td><td>Grader stub with the <code>check()</code> signature below and 4 example test cases</td><td>Yes — you implement it</td></tr>
+      <tr><td><code>agent/</code></td><td>Empty package + course proxy client; budget accounting built in</td><td>Yes — your code</td></tr>
+      <tr><td><code>eval/questions.jsonl</code></td><td>Empty; Milestone 1 fills it with 50 records</td><td>Yes — you write it</td></tr>
+      <tr><td><code>semantic_layer.yaml</code></td><td>Empty; Milestone 3</td><td>Yes — you write it</td></tr>
+    </tbody>
+  </table>
+  <figure>
+    <svg viewBox="0 0 800 360" role="img" aria-label="Architecture: agent loop on top, eval harness below, both reading the pinned snapshot">
+      <style>text{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12px;fill:#1d1a15}.s{font-size:10px;fill:#93321b}</style>
+      <!-- agent row -->
+      <rect x="16" y="40" width="120" height="56" fill="none" stroke="#1d1a15" stroke-width="1.5"/>
+      <text x="30" y="64">NL question</text><text x="30" y="82" class="s">analyst intent</text>
+      <rect x="176" y="40" width="150" height="56" fill="none" stroke="#93321b" stroke-width="1.5"/>
+      <text x="190" y="64">schema retriever</text><text x="190" y="82" class="s">&#8804;20 tables / 8k tok</text>
+      <rect x="366" y="40" width="140" height="56" fill="none" stroke="#93321b" stroke-width="1.5"/>
+      <text x="380" y="64">SQL generator</text><text x="380" y="82" class="s">temp 0, pinned model</text>
+      <rect x="546" y="40" width="160" height="56" fill="none" stroke="#93321b" stroke-width="1.5"/>
+      <text x="560" y="64">self-check + run</text><text x="560" y="82" class="s">&#8804;3 repair rounds</text>
+      <line x1="136" y1="68" x2="176" y2="68" stroke="#1d1a15" stroke-width="1.5"/>
+      <line x1="326" y1="68" x2="366" y2="68" stroke="#1d1a15" stroke-width="1.5"/>
+      <line x1="506" y1="68" x2="546" y2="68" stroke="#1d1a15" stroke-width="1.5"/>
+      <line x1="706" y1="68" x2="760" y2="68" stroke="#1d1a15" stroke-width="1.5"/>
+      <text x="724" y="58">answer</text>
+      <!-- repair loop -->
+      <path d="M626 96 v22 H436 v-22" fill="none" stroke="#93321b" stroke-width="1.2" stroke-dasharray="4 3"/>
+      <text x="470" y="132" class="s">repair: error / empty / suspicious result</text>
+      <!-- semantic layer feeding retriever+generator -->
+      <rect x="176" y="160" width="330" height="44" fill="none" stroke="#93321b" stroke-width="1.5" stroke-dasharray="6 3"/>
+      <text x="190" y="187">semantic_layer.yaml (Milestone 3, ablatable)</text>
+      <line x1="251" y1="160" x2="251" y2="96" stroke="#93321b" stroke-width="1.2" stroke-dasharray="4 3"/>
+      <line x1="436" y1="160" x2="436" y2="96" stroke="#93321b" stroke-width="1.2" stroke-dasharray="4 3"/>
+      <!-- snapshot -->
+      <ellipse cx="626" cy="170" rx="80" ry="14" fill="none" stroke="#1d1a15" stroke-width="1.5"/>
+      <path d="M546 170 v44 c0 8 36 14 80 14 s80 -6 80 -14 v-44" fill="none" stroke="#1d1a15" stroke-width="1.5"/>
+      <text x="566" y="206">warehouse.duckdb</text><text x="572" y="222" class="s">pinned @ 2025-11-30</text>
+      <line x1="626" y1="96" x2="626" y2="156" stroke="#1d1a15" stroke-width="1.5"/>
+      <!-- harness row -->
+      <rect x="16" y="272" width="150" height="56" fill="none" stroke="#1d1a15" stroke-width="1.5"/>
+      <text x="30" y="296">questions.jsonl</text><text x="30" y="314" class="s">50 q + gold SQL</text>
+      <rect x="206" y="272" width="110" height="56" fill="none" stroke="#1d1a15" stroke-width="1.5"/>
+      <text x="220" y="296">runner</text><text x="220" y="314" class="s">per-config</text>
+      <rect x="356" y="272" width="120" height="56" fill="none" stroke="#1d1a15" stroke-width="1.5"/>
+      <text x="370" y="296">grader</text><text x="370" y="314" class="s">exec accuracy</text>
+      <rect x="516" y="272" width="150" height="56" fill="none" stroke="#1d1a15" stroke-width="1.5"/>
+      <text x="530" y="296">error classifier</text><text x="530" y="314" class="s">4 classes + other</text>
+      <line x1="166" y1="300" x2="206" y2="300" stroke="#1d1a15" stroke-width="1.5"/>
+      <line x1="316" y1="300" x2="356" y2="300" stroke="#1d1a15" stroke-width="1.5"/>
+      <line x1="476" y1="300" x2="516" y2="300" stroke="#1d1a15" stroke-width="1.5"/>
+      <line x1="666" y1="300" x2="760" y2="300" stroke="#1d1a15" stroke-width="1.5"/>
+      <text x="676" y="290">ablation</text><text x="690" y="318">table</text>
+      <line x1="416" y1="272" x2="572" y2="228" stroke="#1d1a15" stroke-width="1.2" stroke-dasharray="4 3"/>
+    </svg>
+    <figcaption>Fig. 3.1 — Lab 3 system. Top: the agent loop (retrieve → generate → self-check), optionally fed by the semantic layer. Bottom: the eval harness, which runs every configuration against the same pinned snapshot and emits per-error-class counts. Both halves are graded.</figcaption>
+  </figure>
+</section>
+
+<section class="block">
+  <div class="sec-label">Milestone 1 · end of Week 9, Wed</div>
+  <h2>Eval Set &amp; Grader</h2>
+  <p>Write 50 questions in BIRD style: a natural-language question, optional <code>evidence</code> (a hint an analyst would plausibly have), gold SQL, and the gold answer materialized from the snapshot. Distribution constraints — at least 10 questions joining 3+ tables; at least 8 that hit a trap metric (revenue or active-user); at least 5 unanswerable without choosing between contested definitions; at least 5 whose naive answer comes from a deprecated table. Every gold query must be deterministic on the snapshot (no <code>now()</code>, no unordered <code>LIMIT</code> without a tiebreaker).</p>
+  <p>One record per line in <code>eval/questions.jsonl</code>, exactly these fields:</p>
+  <pre><code># eval/questions.jsonl — one JSON object per line
+{"qid": "q017",
+ "question": "What was net revenue in EMEA in Q3 2025?",
+ "evidence": "Fiscal quarters align with calendar quarters.",
+ "gold_sql": "SELECT round(sum(net_amount),2) FROM analytics.v_net_revenue ...",
+ "gold_answer": [[1834201.55]],          # rows as JSON arrays, canonical order
+ "tags": ["trap:revenue", "multi-join"],
+ "ordered": false}                        # true only if the question implies ranking
+
+# grader/grade.py — the contract you implement
+def check(qid: str, predicted_sql: str,
+          conn: duckdb.DuckDBPyConnection) -> Verdict: ...
+
+Verdict = {"ok": bool,
+           "error_class": None | "wrong-join" | "wrong-metric"
+                        | "hallucinated-column" | "stale-table" | "other"}
+</code></pre>
+  <p><strong>Grader semantics (normative).</strong> A prediction is correct iff it executes without error <em>and</em> its result matches the gold answer as an unordered multiset of rows (ordered comparison when <code>"ordered": true</code>), after normalization: project to gold arity by position, compare floats with tolerance <code>1e-6</code> relative or <code>1e-9</code> absolute, render dates as ISO-8601, treat <code>NULL</code> as distinct from 0 and from the empty string. An empty predicted result matching an empty gold result is <em>not</em> automatically correct — see Pitfalls. On failure, the classifier assigns one error class by precedence: <em>hallucinated-column</em> (binder error on a nonexistent column/table) → <em>stale-table</em> (any reference into <code>orders_v1.*</code> or <code>dim_customer_legacy</code>) → <em>wrong-metric</em> (correct row grain, wrong measure column or aggregate) → <em>wrong-join</em> (row-count or grain mismatch traceable to join structure) → <em>other</em>.</p>
+  <p>Ship an adversarial grader test suite: ≥10 hand-built near-miss cases (wrong query, right-looking answer) that your grader must reject, checked in under <code>grader/tests/</code>.</p>
+</section>
+
+<section class="block">
+  <div class="sec-label">Milestone 2 · end of Week 10, Mon</div>
+  <h2>The Agent Baseline</h2>
+  <p>Implement the agent loop in <code>agent/</code>. Three stages are required; how you implement each is your design space, and your report must defend the choices.</p>
+  <ul>
+    <li><strong>Schema retrieval.</strong> You may not stuff all 200 tables into context. Hard budget: at most 20 tables and 8,000 schema tokens per question. Embedding search over <code>schema_catalog.json</code>, keyword match, FK-graph expansion — anything goes within budget, and the budget is enforced by the proxy.</li>
+    <li><strong>SQL generation.</strong> Single dialect (DuckDB). The generator sees the question, the retrieved schema slice, and — in semantic-layer configurations only — the relevant YAML entries.</li>
+    <li><strong>Self-check.</strong> Execute the candidate with a <code>LIMIT 20</code> probe. On binder errors, runtime errors, empty results, or a self-assessed implausibility (your heuristic — document it), revise. At most 3 repair rounds; at most 12 LLM calls per question end-to-end; at most 16k context tokens per call. Exceeding any budget marks the question failed.</li>
+  </ul>
+  <p>Run the full eval under configuration <strong>A1</strong> (retrieval + self-check, no semantic layer) and the degenerate <strong>A0</strong> (no retrieval: first 20 tables alphabetically — the honest stand-in for “dump whatever fits”). Expect A0 to land near the bottom of the 21→95 curve; if A0 scores above 50%, your eval set is too easy and will be graded as such. Emit <code>runs/&lt;config&gt;/predictions.jsonl</code> with fields <code>qid, sql, config, n_llm_calls, latency_ms</code>.</p>
+</section>
+
+<section class="block">
+  <div class="sec-label">Milestone 3 · end of Week 10, Fri</div>
+  <h2>Semantic Layer &amp; the Ablation Table</h2>
+  <p>Write <code>semantic_layer.yaml</code>: a Cube-style document defining canonical measures, dimensions, join paths, and explicit anti-patterns. It is a contract about the <em>schema</em>, written as if for human analysts; it must never reference your eval questions. Format (normative — the autograder parses it):</p>
+  <pre><code># semantic_layer.yaml — Cube-style, parsed by the autograder
+cubes:
+  - name: net_revenue
+    sql_table: analytics.v_net_revenue
+    description: >
+      Canonical revenue: gross order lines minus returns.
+      Use for any unqualified "revenue" question.
+    measures:
+      - { name: amount, sql: net_amount, type: sum, format: usd }
+    dimensions:
+      - { name: order_date, sql: order_date, type: time }
+      - { name: region,     sql: region,     type: string }
+    joins:
+      - name: dim_customer
+        sql: "{net_revenue}.customer_id = {dim_customer}.id"
+        relationship: many_to_one
+    anti_patterns:
+      - "orders.order_lines.line_amount is gross and includes
+         cancelled orders; never use it as revenue."
+      - "orders_v1.* and dim_customer_legacy are frozen at
+         2024-06-30; never query them."
+</code></pre>
+  <p>Then run every configuration below against the <em>same</em> 50 questions and fill the ablation table. This table, completed with your numbers and a per-class reading of <em>why</em> each delta happened, is the centerpiece of your report. Reproduce the lecture’s 21→95 curve in miniature: A0 should sit near the left end, A3 near the right, and the table should show which component moved which error class.</p>
+  <table>
+    <thead><tr><th>Config</th><th>Components</th><th>Exec acc (%)</th><th>wrong-join</th><th>wrong-metric</th><th>halluc. column</th><th>stale-table</th></tr></thead>
+    <tbody>
+      <tr><td><code>A0</code></td><td>no retrieval, no layer, no self-check</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+      <tr><td><code>A1</code></td><td>retrieval + self-check</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+      <tr><td><code>A2</code></td><td>A1 + semantic layer (descriptions + joins only)</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+      <tr><td><code>A3</code></td><td>A2 + anti-patterns</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+      <tr><td><code>A3−sc</code></td><td>A3 with self-check disabled</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+    </tbody>
+  </table>
+  <p>Report token and call costs per configuration alongside accuracy. A point on the Pareto frontier (accuracy vs. mean LLM calls per question) is worth more than a higher point bought with an unbounded loop.</p>
+</section>
+
+<section class="block">
+  <div class="sec-label">Grading</div>
+  <h2>Rubric</h2>
+  <table>
+    <thead><tr><th>Component</th><th>Points</th><th>What we look at</th></tr></thead>
+    <tbody>
+      <tr><td>Eval set quality (M1)</td><td>15</td><td>Distribution constraints met; gold SQL deterministic; traps genuinely exercised, not name-checked</td></tr>
+      <tr><td>Grader correctness (M1)</td><td>15</td><td>Normalization rules implemented as specified; adversarial suite present and passing; no string-match shortcuts</td></tr>
+      <tr><td>Agent baseline (M2)</td><td>15</td><td>Budgets enforced; A0/A1 reproducible from tag; self-check heuristic documented</td></tr>
+      <tr><td>Semantic layer (M3)</td><td>15</td><td>Parses; covers contested metrics with stated definitions; schema-level, no question leakage</td></tr>
+      <tr><td>Ablation &amp; analysis</td><td>25</td><td>Table complete; per-error-class deltas explained mechanistically; Pareto framing of cost vs. accuracy</td></tr>
+      <tr><td>Report &amp; reproducibility</td><td>10</td><td><code>make reproduce</code> regenerates every number in the report from the tag, on the pinned snapshot</td></tr>
+      <tr><td>Checkpoint questions</td><td>5</td><td>Submitted on time at each milestone; engaged, not pro-forma</td></tr>
+    </tbody>
+  </table>
+  <p>Total: 100. Headline accuracy is deliberately <em>not</em> a rubric line: a team reporting an honest 71% with a sharp error-class analysis outscores a team reporting 94% from a leaky grader. We re-run your harness; numbers that don’t reproduce score the row at zero.</p>
+</section>
+
+<section class="block">
+  <div class="sec-label">Pitfalls</div>
+  <h2>Where Previous Cohorts Lost Points</h2>
+  <div class="aside">
+    <span class="k">Pitfall · eval leakage</span>
+    The subtle version is not pasting gold SQL into a prompt — the autograder catches that. It is writing your semantic layer <em>after</em> watching the agent fail on your own questions, then encoding question-specific fixes as “documentation.” The check: every YAML entry must be justifiable to an analyst who has never seen your eval set. We diff your layer against your question text and flag near-verbatim overlap; we also hold out 10 instructor questions on the same schema, and a large gap between your-50 and our-10 accuracy is treated as leakage.
+  </div>
+  <div class="aside">
+    <span class="k">Pitfall · grader false positives</span>
+    Execution accuracy overcounts in predictable ways: two different wrong queries both return empty; a wrong aggregate coincidentally equals the right one on this snapshot; a query returns the right number wrapped in extra columns your projection-by-arity silently drops. Your adversarial suite exists to catch exactly these. A grader that passes a near-miss case loses the full grader-correctness component, because every downstream number becomes unfalsifiable.
+  </div>
+  <div class="aside">
+    <span class="k">Pitfall · nondeterminism</span>
+    <code>now()</code>, unseeded sampling, and tie-broken <code>LIMIT</code> are the classic ways a gold answer drifts between your laptop and our re-run. The snapshot’s logical date is 2025-11-30; write gold SQL against that constant, and add deterministic tiebreakers to every ranking question.
+  </div>
+</section>
+
+<section class="block">
+  <div class="sec-label">Checkpoints</div>
+  <h2>Checkpoint Questions</h2>
+  <p>Submit short written answers (½ page each) with the corresponding milestone. They are graded for engagement with your own measurements, not for matching an answer key.</p>
+  <div class="exercise">
+    <div class="ex-head">Checkpoint 3.1 · with Milestone 1</div>
+    <div class="ex-body"><p>Execution accuracy on a pinned snapshot can still mark wrong queries correct. Construct two concrete pairs (gold SQL, wrong-but-passing SQL) against the Cordovan schema, explain the coincidence each exploits, and state which normalization rule or adversarial test in your grader closes the hole — or why it can’t be closed without a second snapshot.</p></div>
+  </div>
+  <div class="exercise">
+    <div class="ex-head">Checkpoint 3.2 · with Milestone 2</div>
+    <div class="ex-body"><p>Present the error-class histogram for A1. Before running Milestone 3, predict in writing which classes the semantic layer will reduce and which it cannot touch, with a mechanistic reason per class (e.g., can documentation fix a <em>wrong-join</em> caused by grain mismatch, or only a <em>wrong-metric</em>?). You will be graded on the quality of the reasoning, then asked to revisit the prediction in your final report.</p></div>
+  </div>
+  <div class="exercise">
+    <div class="ex-head">Checkpoint 3.3 · with Milestone 3</div>
+    <div class="ex-body"><p>Your 21→95 in miniature: using the ablation table, identify the single semantic-layer ingredient (descriptions, join paths, or anti-patterns) that bought the most accuracy per added context token. Where does your A3 sit on the accuracy-vs-cost Pareto frontier relative to A2, and is <code>A3−sc</code> evidence that self-check and the semantic layer are substitutes or complements on this schema?</p></div>
+  </div>
+  <div class="fleuron">❦</div>
+</section>
+
+<nav class="pager">
+  <a href="lab-2.html"><span class="dir">← Lab 2</span><span class="ttl">Lab 2</span></a>
+  <a class="next" href="lab-4.html"><span class="dir">Lab 4 →</span><span class="ttl">Lab 4</span></a>
+</nav>
+
+</main>
+
+<footer class="site">
+  <div class="inner">
+    <span>DATA 2027 — a course that doesn’t exist yet · <a href="../index.html">Essay № 01</a> · <a href="../course.html">Essay № 02</a></span>
+    <span>CC BY 4.0 · built with <a href="https://claude.com/claude-code">Claude Code</a></span>
+  </div>
+</footer>
+
+</body>
+</html>

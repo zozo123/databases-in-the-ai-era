@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Week 11: Memory Is a Database Problem — DATA 2027</title>
+<meta name="description" content="Agent memory systems read as database designs: Mem0, MemGPT, and Zep/Graphiti through the lens of durability, temporal data, compaction, and isolation.">
+<meta name="theme-color" content="#f6f1e7">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23f6f1e7'/%3E%3Cellipse cx='50' cy='28' rx='30' ry='12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 28v44c0 6.6 13.4 12 30 12s30-5.4 30-12V28' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 50c0 6.6 13.4 12 30 12s30-5.4 30-12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500;9..144,600;9..144,900&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400;1,6..72,500&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="course.css">
+</head>
+<body>
+
+<div class="masthead">
+  <span><a href="index.html">DATA 2027</a> <span class="dot">●</span> DATA SYSTEMS IN THE AGENTIC ERA</span>
+  <span><a href="index.html">← SCHEDULE</a></span>
+</div>
+
+<header class="page-head">
+  <div class="kicker">Week 11 · Part III — Semantics, Agents, Governance</div>
+  <h1>Memory Is a <em>Database</em> Problem</h1>
+  <p class="standfirst">Every agent memory system shipped since 2023 is a storage engine wearing a trench coat: a write path, a read path, an index, and a compaction policy. This week we take the coat off and grade what’s underneath.</p>
+  <div class="meta"><b>Lectures:</b> Tue — Agent memory systems, read as database designs · Thu — Temporal knowledge, consolidation, and forgetting &nbsp;·&nbsp; <b>Lab:</b> Fri — Build a bi-temporal fact store over SQLite and break it with contradictions</div>
+</header>
+
+<main>
+
+<section class="block">
+  <div class="objectives">
+    <div class="k">Learning objectives — after this week you can…</div>
+    <ul>
+      <li>State the four workload requirements of agent memory (episodic append, semantic recall, namespace isolation, cheap point reads) and map each to a classical storage structure.</li>
+      <li>Trace a write through Mem0’s extract–consolidate pipeline and identify exactly where durability, determinism, and auditability are lost.</li>
+      <li>Explain MemGPT’s main/external context split as buffer-pool management, including what its “page replacement policy” actually is.</li>
+      <li>Design a bi-temporal edge schema (t_valid / t_invalid) and show how contradiction-as-invalidation reproduces Type-2 slowly-changing dimensions from 1990s warehousing.</li>
+      <li>Articulate the semantic phantom problem and argue why derived-belief consistency is an isolation question the field has not yet answered.</li>
+    </ul>
+  </div>
+</section>
+
+<section class="block">
+  <div class="sec-label">Lecture 1 · Tuesday</div>
+  <h2>Agent Memory Systems, Read as Database Designs</h2>
+
+  <p class="opener">Strip the branding off any agent memory product and you find a workload spec. An agent finishing a conversational turn must <strong>append an episode</strong> — cheap, sequential, never blocking the response. Before its next turn it must <strong>recall semantically</strong>: “what do I know that bears on this?”, which in practice means hybrid retrieval — vector similarity for paraphrase, BM25 for exact tokens like error codes and invoice numbers, graph traversal for multi-hop relations (“who manages the person who owns this service?”). It needs <strong>namespace isolation</strong>, because memory leaking between user A and user B is a privacy breach, not a recall improvement. And it needs <strong>cheap point reads</strong>, because “what’s this user’s timezone?” must cost microseconds, not an embedding call. Sequential append, secondary indexes, multi-tenancy, primary-key lookup: you have known these four requirements since the second week of your first databases course. The physics didn’t change. The client did.</p>
+
+  <h3>The workload, made precise</h3>
+  <p>Put numbers on it. A support agent serving 10k conversations/day with 20 turns each generates ~200k episodic appends daily — trivial write volume; a single Postgres instance yawns at it. The hard part is the read side: every turn issues at least one recall query with a latency budget inside the human’s patience window, and recall quality directly moves task success. The Mem0 paper measures the naïve alternative — replay the entire history into the prompt — at a p95 end-to-end latency around 17 seconds on LOCOMO-length conversations, versus roughly 1.4 s for retrieval over distilled memories, with more than 90% fewer tokens billed. That is not a clever optimization; that is the difference between a usable product and a demo. Recall it from Week 4: the moment you cannot afford to scan, you must index, and the moment you index, you must decide what the index is <em>over</em>. Agent memory systems differ mainly in that one decision.</p>
+
+  <h3>Mem0: an LLM-driven upsert pipeline</h3>
+  <p>Mem0 (arXiv 2504.19413) answers: index over <em>extracted facts</em>, not raw transcript. Its write path is a two-phase pipeline. <strong>Extraction:</strong> after each exchange, an LLM call reads the new messages plus a rolling conversation summary and emits candidate memories — short declarative facts (“user is vegetarian”, “project Helios ships March 4”). <strong>Consolidation:</strong> for each candidate, the system retrieves the most similar existing memories and a second LLM call picks one of four operations: <code>ADD</code>, <code>UPDATE</code>, <code>DELETE</code>, or <code>NOOP</code>. Read that list again. It is an upsert resolver — the same merge logic a CDC pipeline runs against a dimension table — except the comparator is a language model rather than a key equality test. The payoff is real: Mem0 reports a 26% relative improvement over OpenAI’s built-in memory on LOCOMO question answering (LLM-as-judge), and its graph-extended variant Mem0<sup>g</sup> adds another couple of points on temporal and multi-hop questions by also writing facts as subject–predicate–object edges.</p>
+  <p>Now grade it as a database. <strong>Durability:</strong> the raw episode may be durable, but the <em>memory</em> is whatever the extractor happened to notice. A fact the LLM skips was never written; there is no redo log for attention. <strong>Determinism:</strong> run the same transcript twice and consolidation can produce different stores — temperature-zero helps but model updates break replay. <strong>Audit:</strong> when an <code>UPDATE</code> overwrites “user lives in Berlin” with “user lives in Lisbon”, default configurations keep no tombstone, no before-image, no provenance pointer back to the source turn. A bank examiner would fail this system in an afternoon. None of these are fatal — they are <em>fixable</em>, with a fact log, source citations on every memory row, and versioned writes — but you must see them, and the only way to see them is to read the system as a database.</p>
+
+  <h3>MemGPT: the buffer pool, rediscovered</h3>
+  <p>MemGPT (Packer et al., 2023) takes the OS metaphor literally. The model’s context window is <strong>main context</strong> — scarce, fast, fixed-size, like RAM. Everything else is <strong>external context</strong>: recall storage (the full message log) and archival storage (arbitrary documents and notes), both unbounded, both reachable only through explicit function calls the model itself issues — <code>archival_memory_search</code>, <code>conversation_search</code>, and self-edits to a small pinned “working context.” When the FIFO message queue nears the token limit, the system raises a memory-pressure warning, the model summarizes and evicts, and the evicted pages live on in recall storage. Translate to our vocabulary: main context is the buffer pool, eviction-with-summary is page replacement where the “page” is rewritten lossily on the way out, and the warning at ~70% occupancy is a high-water mark triggering a flush. The genuinely novel move is who runs the replacement policy: the model does, via tool calls — the application program is its own buffer manager. DBAs spent thirty years learning why application-managed caching is hard (hint rot, working-set misestimation, no global view), and every one of those failure modes reappears here: MemGPT agents forget to page in what they need and confabulate instead of faulting.</p>
+
+  <div class="aside"><span class="k">Field note</span>A team I advised shipped a Mem0-style memory for a sales agent. Three weeks in, a customer asked why the agent kept calling him by his predecessor’s name. Root cause: the consolidation LLM had judged “new account contact is Dana” as a <code>NOOP</code> against “account contact is Marcus” — similar embeddings, different truth. The fix was not a better prompt. It was a unique constraint: one <code>contact_for(account)</code> fact per account, writes must invalidate the old row. They reinvented the primary key, eight months and one churned customer late.</div>
+
+  <h3>Report card</h3>
+  <table>
+    <thead>
+      <tr><th>Property</th><th>Mem0</th><th>MemGPT</th><th>Zep / Graphiti</th><th>What a DBMS would say</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><b>Write path</b></td><td>LLM extract → LLM upsert (ADD/UPDATE/DELETE/NOOP)</td><td>Self-directed tool calls; eviction summaries</td><td>Entity/edge extraction into temporal graph</td><td>Log first, derive later; never lose the base write</td></tr>
+      <tr><td><b>Read path</b></td><td>Vector top-k over facts (+ graph in Mem0<sup>g</sup>)</td><td>Model-issued search over recall/archival</td><td>Hybrid: cosine + BM25 + graph traversal, fused</td><td>Optimizer picks access path; client shouldn’t have to</td></tr>
+      <tr><td><b>Durability</b></td><td>Lossy at extraction; no redo for missed facts</td><td>Lossy at eviction (summary ≠ page)</td><td>Episodes retained; edges invalidated, not deleted</td><td>WAL or it didn’t happen</td></tr>
+      <tr><td><b>Audit / provenance</b></td><td>Weak by default; overwrites destroy history</td><td>Working-context edits unversioned</td><td>Strong: bi-temporal lineage per edge</td><td>Every version queryable <code>AS OF</code></td></tr>
+      <tr><td><b>Consistency</b></td><td>Async consolidation → stale reads possible</td><td>Single-agent serial; fine until you shard</td><td>Graph consistent; derived summaries can lag</td><td>Define the isolation level, then enforce it</td></tr>
+    </tbody>
+  </table>
+
+  <div class="pull">An agent that cannot say <b>why it believes something</b> is just a cache with opinions.</div>
+</section>
+
+<section class="block">
+  <div class="sec-label">Lecture 2 · Thursday</div>
+  <h2>Temporal Knowledge, Consolidation, and Forgetting</h2>
+
+  <p class="opener">Tuesday’s systems mostly treat memory as a mutable key–value store: new fact in, old fact gone. Thursday’s thesis is that this is the wrong data model, and that the right one was worked out by the database community in the 1990s while today’s agent framework authors were in elementary school. Facts about the world are not values to overwrite; they are <em>intervals</em> to close. “Alice is the on-call engineer” was true from March 3 to March 17. When Bob takes over, the Alice-edge does not become false retroactively — it becomes <em>bounded</em>. Zep’s Graphiti engine (arXiv 2501.13956) builds agent memory on exactly this insight: a temporally-aware knowledge graph in which every edge carries validity timestamps, contradiction closes intervals instead of deleting rows, and the past remains queryable. The result isn’t just tidier bookkeeping — Zep beats MemGPT on the Deep Memory Retrieval benchmark (94.8% vs 93.4%) and posts up to 18.5% accuracy gains on LongMemEval with ~90% lower latency than full-context baselines, precisely because temporal structure lets it retrieve the <em>right version</em> of a fact.</p>
+
+  <h3>Bi-temporal edges: t_valid and t_invalid</h3>
+  <p>Graphiti stores knowledge as a graph of entities and relationship edges, where each edge carries two timelines. The <strong>valid-time</strong> pair — <code>t_valid</code>, <code>t_invalid</code> — records when the fact held <em>in the world</em>. The <strong>transaction-time</strong> pair — when the system learned and when it superseded the record — tracks the database’s own epistemic history. This is textbook bi-temporality: Snodgrass’s TSQL2 proposal formalized it in 1995, and SQL:2011 finally standardized <code>PERIOD</code> columns and <code>AS OF</code> queries. The agent-flavored twist is the ingestion trigger. When a new episode yields an edge that contradicts an existing one — “Dana is the account contact” arriving while “Marcus is the account contact” is open — Graphiti does not delete Marcus. It sets the Marcus edge’s <code>t_invalid</code> to the new fact’s <code>t_valid</code> and inserts Dana as a fresh open-ended edge. Three queries become trivial that overwrite-based stores cannot answer at all: <em>what is true now</em> (filter <code>t_invalid IS NULL</code>), <em>what was true on April 2</em> (interval containment), and <em>what did we believe on April 2</em> (the transaction-time variant — essential for audit, because what the agent believed when it acted is what determines liability).</p>
+
+  <figure>
+    <svg viewBox="0 0 800 360" role="img" aria-label="Bi-temporal edge timeline showing contradiction as invalidation">
+      <rect x="0" y="0" width="800" height="360" fill="#efe8d8"/>
+      <!-- time axis -->
+      <path d="M60 300 C 260 297, 540 302, 750 299" stroke="#1d1a15" stroke-width="2" fill="none"/>
+      <path d="M738 292 L 752 299 L 737 306" stroke="#1d1a15" stroke-width="2" fill="none"/>
+      <text x="700" y="330" font-family="monospace" font-size="14" fill="#1d1a15">time →</text>
+      <!-- tick marks -->
+      <path d="M180 293 L 179 308" stroke="#1d1a15" stroke-width="2"/>
+      <text x="148" y="328" font-family="monospace" font-size="13" fill="#1d1a15">Mar 03</text>
+      <path d="M470 292 L 471 307" stroke="#1d1a15" stroke-width="2"/>
+      <text x="438" y="328" font-family="monospace" font-size="13" fill="#1d1a15">Mar 17</text>
+      <!-- edge 1: Marcus (closed interval) -->
+      <rect x="180" y="90" width="290" height="52" fill="none" stroke="#93321b" stroke-width="2.5" rx="4" transform="rotate(-0.4 325 116)"/>
+      <text x="200" y="113" font-family="monospace" font-size="14" fill="#1d1a15">contact_for(acme) = Marcus</text>
+      <text x="200" y="132" font-family="monospace" font-size="12" fill="#93321b">t_valid: Mar 03  t_invalid: Mar 17</text>
+      <!-- closure mark -->
+      <path d="M470 84 L 470 148" stroke="#93321b" stroke-width="3" stroke-dasharray="6 4"/>
+      <text x="482" y="80" font-family="monospace" font-size="12" fill="#93321b">closed, not deleted</text>
+      <!-- edge 2: Dana (open interval) -->
+      <rect x="470" y="180" width="280" height="52" fill="none" stroke="#1d1a15" stroke-width="2.5" rx="4" transform="rotate(0.4 610 206)"/>
+      <text x="488" y="203" font-family="monospace" font-size="14" fill="#1d1a15">contact_for(acme) = Dana</text>
+      <text x="488" y="222" font-family="monospace" font-size="12" fill="#93321b">t_valid: Mar 17  t_invalid: ∅</text>
+      <!-- arrow from new fact to invalidation -->
+      <path d="M520 178 C 505 160, 488 152, 474 146" stroke="#93321b" stroke-width="2" fill="none"/>
+      <path d="M484 144 L 472 144 L 478 156" stroke="#93321b" stroke-width="2" fill="none"/>
+      <text x="520" y="165" font-family="monospace" font-size="12" fill="#93321b">new edge invalidates old</text>
+      <!-- AS OF query annotations -->
+      <path d="M320 60 L 320 86" stroke="#1d1a15" stroke-width="1.5" stroke-dasharray="3 4"/>
+      <text x="230" y="50" font-family="monospace" font-size="13" fill="#1d1a15">AS OF Mar 10 → Marcus</text>
+      <path d="M640 256 L 640 236" stroke="#1d1a15" stroke-width="1.5" stroke-dasharray="3 4"/>
+      <text x="560" y="276" font-family="monospace" font-size="13" fill="#1d1a15">AS OF now → Dana</text>
+    </svg>
+    <figcaption>Fig. 11.1 — Contradiction as invalidation. The arrival of the Dana edge closes the Marcus edge’s validity interval (t_invalid := Mar 17) but preserves the row. Point-in-time queries (AS OF) return the edge whose interval contains the query timestamp; “current truth” is simply t_invalid IS NULL.</figcaption>
+  </figure>
+
+  <h3>The field did this in the 90s</h3>
+  <p>Recognize the pattern from your warehousing reading: this is Kimball’s <strong>Type-2 slowly-changing dimension</strong>, circa 1996. When a customer moves, you don’t update the row — you expire it (<code>row_effective_date</code>, <code>row_expiration_date</code>, <code>is_current</code> flag) and insert a successor, so historical facts join to the dimension <em>as it was</em>. Graphiti’s edge invalidation is a Type-2 SCD with an LLM deciding when two rows are “the same dimension member,” which is both its power (it handles natural-language contradiction, fuzzy entity matching, partial updates) and its risk (the expiry trigger is now probabilistic). The lesson for you as designers: when an agent-memory vendor describes “temporal awareness” as novel, the right response is to ask which of TSQL2’s query classes they support and what their answer to coalescing adjacent intervals is. The vocabulary already exists. Use it, and you can spot the gaps in an afternoon.</p>
+
+  <h3>Consolidation is compaction; forgetting is GC</h3>
+  <p>Two more borrowed mechanisms hide in plain sight. <strong>Consolidation</strong> — merging episodic fragments into stable semantic facts, the thing cognitive scientists say sleep does — is structurally identical to LSM-tree compaction. Raw episodes are L0: small, recent, overlapping, fast to write. Periodic background passes merge them into wider, deduplicated, contradiction-resolved runs (entity summaries, community summaries in Graphiti’s case). The design questions transfer verbatim: when do you compact (write-triggered, size-tiered, scheduled), what does compaction cost (here, LLM tokens — a real dollar number you can put in a cost model), and what is read amplification before compaction versus write amplification after? <strong>Forgetting</strong> is garbage collection with a policy knob. TTL deletion (“drop episodes after 90 days”) is the blunt instrument; decay-scored eviction — rank memories by a function like <code>score = recency_weight · e<sup>−Δt/τ</sup> + use_count · w<sub>u</sub></code> and evict the tail — is generational GC by another name. And here the temporal model earns its keep: in a bi-temporal store you can forget <em>retrievability</em> (drop the index entry) without forgetting <em>the record</em> (keep the audit row), which is exactly the split GDPR-era systems need. Overwrite-based memories can’t make that distinction; they have only one delete, and it destroys evidence.</p>
+
+  <div class="aside"><span class="k">Historical aside</span>Richard Snodgrass spent a decade (1987–1997) trying to get TSQL2 into the SQL standard; the committee declined, and bi-temporal support didn’t land until SQL:2011 — by which time most practitioners had hand-rolled validity columns anyway. The agent-memory community is now re-deriving his taxonomy, point by point, in GitHub issues. There is a citation graph that should exist and doesn’t. Be the generation that fixes it.</div>
+
+  <h3>The semantic phantom: derived beliefs and an open isolation question</h3>
+  <p>Finish with the problem nobody has solved. Consolidated memories are <strong>derived data</strong> — summaries, entity profiles, community digests computed from base episodes. Derived data goes stale. Now picture the failure: at 09:00 the agent’s entity summary says “Acme’s contact is Marcus, renewal likely.” At 09:05 an episode arrives — Marcus has left the company. The bi-temporal graph updates correctly: Marcus’s edge is invalidated within seconds. But the <em>summary</em> is regenerated lazily, on the next consolidation pass, at 09:30. At 09:12 the agent reads the summary, drafts a renewal email to Marcus, and sends it. Every base read was consistent. The action was still wrong. We call this a <strong>semantic phantom</strong>, by analogy to phantom reads: a belief that no longer corresponds to any committed base fact, yet remains readable because it lives in a derived representation. Classical answers map awkwardly. Synchronous summary maintenance is the materialized-view answer — correct, but it puts an LLM call on the write path, multiplying latency and cost. Snapshot semantics would demand the summary declare the episode-LSN it was derived from, and the agent refuse to act when base facts have advanced past it — a freshness predicate on reads, which no shipping memory system exposes. Versioned beliefs with read-time validation is the OCC answer: act, then check the summary’s watermark before commit, and abort the action if stale. Notice what’s genuinely open: actions are <em>not transactions</em> — you cannot abort a sent email — so “abort on validation failure” must become “block before the side effect,” which requires the system to know which reads feed which irreversible actions. That is a dependency-tracking problem, an isolation-level problem, and an agent-architecture problem all at once. It is also, I’d argue, the most important unsolved database problem in this course — and next week, when an agent with stale beliefs also holds your production credentials, you will see why.</p>
+</section>
+
+<section class="block">
+  <div class="sec-label">Readings</div>
+  <h2>Read Before Thursday</h2>
+  <div class="reads-block">
+    <div class="read-row"><div class="n">1</div><div class="t"><i>Mem0: Building Production-Ready AI Agents with Scalable Long-Term Memory</i> — Chhikara, Khant, Aryan, Singh, Yadav; arXiv:2504.19413, 2025.<span class="v">Read §3 as a write-path spec: extraction then ADD/UPDATE/DELETE/NOOP consolidation. Focus on the latency/token tables and ask where an audit log would have to live.</span></div></div>
+    <div class="read-row"><div class="n">2</div><div class="t"><i>Zep: A Temporal Knowledge Graph Architecture for Agent Memory</i> — Rasmussen, Paliychuk, Beauvais, Ryan, Chalef; arXiv:2501.13956, 2025.<span class="v">The Graphiti bi-temporal edge model is the heart. Map t_valid/t_invalid onto SQL:2011 periods and Type-2 SCDs as you read — the correspondence is nearly exact.</span></div></div>
+    <div class="read-row"><div class="n">3</div><div class="t"><i>MemGPT: Towards LLMs as Operating Systems</i> — Packer, Wooders, Lin, Fang, Patil, Stoica, Gonzalez; arXiv:2310.08560, 2023.<span class="v">Read the OS metaphor adversarially: main/external context is a buffer pool with the application as its own buffer manager. List the failure modes that DBMSs solved by NOT doing this.</span></div></div>
+  </div>
+</section>
+
+<section class="block">
+  <div class="sec-label">Exercises</div>
+  <h2>This Week’s Problems</h2>
+  <div class="exercise">
+    <div class="ex-head">Exercise 11.1 · warm-up</div>
+    <div class="ex-body"><p>Write the SQL DDL for a bi-temporal fact-edge table (<code>subject</code>, <code>predicate</code>, <code>object</code>, <code>t_valid</code>, <code>t_invalid</code>, <code>tx_recorded</code>, <code>tx_superseded</code>, <code>source_episode_id</code>). Then write three queries: (a) current truth for a given subject–predicate, (b) valid-time <code>AS OF</code> a past date, and (c) transaction-time “what did we believe on date D” — and explain in one paragraph why (b) and (c) can return different answers for the same D.</p></div>
+  </div>
+  <div class="exercise">
+    <div class="ex-head">Exercise 11.2 · core</div>
+    <div class="ex-body"><p>Grade Mem0 as a storage engine. Using the paper’s pipeline, identify: (1) the precise point where a fact can be permanently lost despite a durable episode log, (2) two distinct sources of non-determinism on replay, and (3) the minimal schema additions (be concrete — columns, constraints, triggers) that would give every memory row provenance back to its source turn and make every <code>UPDATE</code> auditable. Estimate the token-cost overhead of your fix per 1,000 conversational turns, stating your assumptions about extraction batch size and model pricing.</p></div>
+  </div>
+  <div class="exercise">
+    <div class="ex-head">Exercise 11.3 · stretch</div>
+    <div class="ex-body"><p>Design an isolation level for derived beliefs. Specify <em>belief-snapshot isolation</em>: every derived artifact (summary, entity profile) carries a watermark — the maximum episode LSN it reflects — and every irreversible action declares its read set. Define (a) the validation rule that must pass before a side effect executes, (b) the behavior on validation failure given that actions cannot abort, and (c) a relaxation lattice (which predicates may go stale, by how much, for which action classes — sending email vs. answering a question). Then argue the hard part: prove, or refute with a counterexample, that your scheme prevents all semantic phantoms without ever requiring a synchronous LLM call on the write path. We believe the unqualified claim is false; characterize precisely the class of workloads for which it holds.</p></div>
+  </div>
+  <div class="fleuron">❦</div>
+</section>
+
+<nav class="pager">
+  <a href="week-10.html"><span class="dir">← Week 10</span><span class="ttl">Semantic Operators</span></a>
+  <a class="next" href="week-12.html"><span class="dir">Week 12 →</span><span class="ttl">Protocols, Permissions &amp; the Lethal Trifecta</span></a>
+</nav>
+
+</main>
+
+<footer class="site">
+  <div class="inner">
+    <span>DATA 2027 — a course that doesn’t exist yet · <a href="../index.html">Essay № 01</a> · <a href="../course.html">Essay № 02</a></span>
+    <span>CC BY 4.0 · built with <a href="https://claude.com/claude-code">Claude Code</a></span>
+  </div>
+</footer>
+
+</body>
+</html>

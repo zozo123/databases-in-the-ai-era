@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Week 9: Text-to-SQL Is Not Solved; It’s Specified — DATA 2027</title>
+<meta name="description" content="Why enterprise text-to-SQL collapses on real warehouses, and why the semantic layer — not a bigger model — is the fix: metrics, grain, and governed joins as a contract that agents can query.">
+<meta name="theme-color" content="#f6f1e7">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23f6f1e7'/%3E%3Cellipse cx='50' cy='28' rx='30' ry='12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 28v44c0 6.6 13.4 12 30 12s30-5.4 30-12V28' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 50c0 6.6 13.4 12 30 12s30-5.4 30-12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500;9..144,600;9..144,900&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400;1,6..72,500&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="course.css">
+</head>
+<body>
+
+<div class="masthead">
+  <span><a href="index.html">DATA 2027</a> <span class="dot">●</span> DATA SYSTEMS IN THE AGENTIC ERA</span>
+  <span><a href="index.html">← SCHEDULE</a></span>
+</div>
+
+<header class="page-head">
+  <div class="kicker">Week 09 · Part III — Semantics, Agents, Governance</div>
+  <h1>Text-to-SQL Is Not <em>Solved</em>; It’s Specified</h1>
+  <p class="standfirst">Models write fluent SQL against toy schemas and produce confident nonsense against real warehouses. The gap is not intelligence — it is the absence of a written contract about what the data means, and this week we build that contract.</p>
+  <div class="meta"><b>Lectures:</b> Tue — Why enterprise text-to-SQL fails · Thu — The semantic layer as schema-for-models &nbsp;·&nbsp; <b>Lab:</b> Fri — Write a semantic layer for a 400-column retail warehouse and measure the accuracy delta</div>
+</header>
+
+<main>
+
+<section class="block">
+  <div class="objectives">
+    <div class="k">Learning objectives — after this week you can…</div>
+    <ul>
+      <li>Explain the 86% → 17% cliff between Spider 1.0 and Spider 2.0, and name the four properties of enterprise warehouses that cause it.</li>
+      <li>Classify a failed agent-generated query into the standard taxonomy: wrong join, wrong metric variant, hallucinated column, stale schema.</li>
+      <li>Define a semantic layer precisely — metrics, dimensions, grain, governed joins — and explain why it is a queryable contract rather than documentation.</li>
+      <li>Rank context sources by trustworthiness (semantic layer &gt; lineage &gt; query corpus &gt; business context) and justify the ordering with failure-mode arguments.</li>
+      <li>Argue, with evidence, why LLM-bootstrapping a semantic layer fails, and where the human/model division of labor actually sits.</li>
+    </ul>
+  </div>
+</section>
+
+<section class="block">
+  <div class="sec-label">Lecture 1 · Tuesday</div>
+  <h2>Why Enterprise Text-to-SQL Fails</h2>
+
+  <p class="opener">For about three years, text-to-SQL looked like a solved problem. On Spider 1.0 — the academic benchmark of record, released in 2018 — frontier models climbed past 86% execution accuracy, and the leaderboard compressed into a fight over decimal points. Then in late 2024 the same research group released Spider 2.0, built from real enterprise warehouses instead of curated classroom databases, and the best agentic frameworks scored roughly 17% at launch. Nothing about the models got worse. The benchmark simply stopped lying about what the task is. Today’s lecture is about what Spider 1.0 was hiding, and why every property it hid is a property of the database <em>environment</em>, not of SQL generation per se.</p>
+
+  <h3>The cliff: what Spider 2.0 actually changed</h3>
+  <p>Spider 1.0 databases average around 27 columns across 5 tables, with clean names like <code>student.age</code> and one obvious join path between any two tables. Spider 2.0 instances are drawn from production-grade warehouses — BigQuery public datasets, Snowflake deployments, real dbt projects — and they differ on four axes simultaneously:</p>
+  <ul>
+    <li><strong>Scale of schema.</strong> Databases routinely carry 1,000–3,000+ columns. A schema dump alone can exceed 100K tokens, so “put the schema in the prompt” stops being a strategy and becomes a retrieval problem. The model must <em>find</em> the right three tables before it can join them, and column-name collisions (<code>amount</code>, <code>amount_usd</code>, <code>amt_net</code>, <code>total_amount_v2</code>) make lexical retrieval actively misleading.</li>
+    <li><strong>Dialects.</strong> Real warehouses speak BigQuery SQL, Snowflake SQL, DuckDB, ClickHouse — each with different date functions, quoting rules, lateral-join syntax, and semi-structured-data operators. A model trained mostly on SQLite-flavored benchmarks emits <code>strftime</code> where it needs <code>FORMAT_TIMESTAMP</code>. Dialect errors are the cheapest failures because they fail loudly; they are also a warning that the training distribution does not match the deployment distribution.</li>
+    <li><strong>Multi-step workflows.</strong> Spider 2.0 tasks often require exploration: inspect <code>INFORMATION_SCHEMA</code>, sample rows to learn the encoding of a status column, build an intermediate result, then write the final query — sometimes 100+ lines with CTEs, window functions, and a pivot. Single-shot generation is structurally incapable here; this is an agent task with a feedback loop, which is exactly why Spider 2.0 was evaluated with agentic frameworks rather than one forward pass.</li>
+    <li><strong>Business logic absent from the schema.</strong> The killer. “Active customer” might mean <em>made a purchase in the trailing 90 days, excluding refunds and test accounts</em>. No DDL says that. The warehouse stores facts; the meaning of the facts lives in dbt models, BI definitions, Slack threads, and the heads of two analysts. A model with perfect SQL skill and zero access to those definitions can only guess — and a fluent guess is worse than an error, because it survives review.</li>
+  </ul>
+  <p>Hold on to that decomposition. Axes one through three are engineering problems — retrieval, dialect adapters, agent loops — and the field is making steady progress on all of them. Axis four is not an engineering problem at all. It is a missing specification, and no amount of model scale fills in a definition that was never written down.</p>
+
+  <h3>BIRD and the annotation-quality problem</h3>
+  <p>BIRD (NeurIPS 2023) sits between the toy and the warehouse: 12,751 questions over 95 databases totaling 33 GB, with deliberately “dirty” values and an explicit <em>external knowledge</em> field — a hint like “revenue means <code>price * quantity</code>” attached to each question. BIRD was the first major benchmark to admit that the question alone underdetermines the SQL. That admission was the important contribution. But it surfaced a second, more uncomfortable lesson: when later audits re-examined BIRD’s gold queries, a substantial fraction were themselves wrong or ambiguous — wrong joins, questions with multiple defensible readings, gold SQL that disagreed with the stated evidence. Human experts hired to annotate “the correct SQL” for realistic questions could not reliably produce it either.</p>
+  <p>Students usually read this as a quality-control scandal. Read it instead as a measurement: <strong>the inter-annotator agreement on “the right SQL for this business question” is far below 1.0, even among professionals staring at the same schema.</strong> If humans can’t agree on the target, an 80%-accurate model isn’t 20% away from solved — it’s being graded against a noisy key. The task as posed (English in, SQL out, no shared definitions) is underspecified, and underspecified tasks have no ceiling to converge to.</p>
+
+  <h3>Stonebraker’s zero</h3>
+  <p>Michael Stonebraker — who has earned the right to be grumpy about database fashion — reported the bluntest version of the result: his group took state-of-the-art text-to-SQL systems, pointed them at MIT’s own data warehouse with realistic questions from its actual users, and measured an accuracy of approximately <strong>zero</strong>. Not 17%. Zero. MIT’s warehouse is not adversarial; it is merely <em>ordinary</em> — decades of accreted tables, cryptic column names inherited from a mainframe era, conventions documented nowhere. The benchmarks-to-production gap is not a gap. It is most of the problem.</p>
+
+  <div class="aside">
+    <span class="k">Field note</span>
+    A team I worked with shipped a text-to-SQL assistant over a 2,400-column SAP-derived warehouse. In the pilot, the model answered “what was Q3 churn?” three times with three different numbers — all syntactically valid, all executed without error, each using a different one of the four <code>churn</code>-adjacent columns left behind by three generations of analysts. The post-mortem’s first finding: the company itself had no single agreed definition of churn. The model had faithfully reproduced the org chart’s disagreement. That post-mortem line — “the model reproduced our ambiguity” — is the thesis of Thursday’s lecture.
+  </div>
+
+  <h3>A failure taxonomy</h3>
+  <p>When you grade failed enterprise queries by hand — and in Friday’s lab you will — nearly everything lands in four bins. Learn them; they recur in every paper and every production incident review.</p>
+  <ul>
+    <li><strong>Wrong join.</strong> The query joins <code>orders</code> to <code>customers</code> through a deprecated bridge table, or fans out a one-to-many and silently double-counts revenue. The SQL is valid; the cardinality is wrong. This is the most dangerous bin because the result is plausible — off by 1.3×, not 1000×.</li>
+    <li><strong>Wrong metric variant.</strong> Gross revenue vs. net of refunds; ARR vs. recognized revenue; calendar month vs. fiscal month. The model picked <em>a</em> revenue, just not <em>the</em> revenue the asker meant. This is axis four wearing a costume.</li>
+    <li><strong>Hallucinated column.</strong> Under retrieval pressure on a 3,000-column schema, the model invents <code>customer.lifetime_value</code> because it plausibly should exist. This one at least fails loudly — the database throws — unless a similarly named column exists, in which case it degrades into bin two.</li>
+    <li><strong>Stale schema.</strong> The context the model saw (a cached schema dump, an old dbt manifest, a six-month-old example query) describes a warehouse that no longer exists. Migrations renamed <code>user_id</code> to <code>account_id</code>; the model writes correct SQL against a ghost. This is a freshness/invalidation problem, and it is the bin that grows fastest as organizations bolt context onto agents without versioning it.</li>
+  </ul>
+  <p>Notice the pattern: only one of the four (hallucinated column) is a “model is dumb” failure, and it is the most fixable. The other three are failures of <em>specification and contract</em> — exactly the things a schema was supposed to provide and, for analytical meaning, never did. The schema tells you what is storable. Nothing machine-readable tells you what is <em>meant</em>. Thursday we fix that.</p>
+</section>
+
+<section class="block">
+  <div class="sec-label">Lecture 2 · Thursday</div>
+  <h2>The Semantic Layer as Schema-for-Models</h2>
+
+  <p class="opener">Here is the reframe that organizes everything in Part III of this course: a relational schema is a contract about <em>structure</em>, and for fifty years that contract was enough, because the consumers of meaning were humans who carried definitions in their heads. Agents carry nothing. They need the meaning contract written down, machine-readable, and queryable — and that artifact already has a name from the BI world: the <strong>semantic layer</strong>. It was invented to keep dashboards consistent. It turns out to be the schema that models were missing.</p>
+
+  <h3>What a semantic layer actually is</h3>
+  <p>Strip away vendor branding and a semantic layer is four kinds of declarations sitting between raw tables and every query consumer:</p>
+  <ul>
+    <li><strong>Metrics</strong> — named, versioned computations with their filters baked in. <code>net_revenue</code> is not “whatever SUM the model writes” but a single governed expression: gross minus refunds minus test accounts, defined once.</li>
+    <li><strong>Dimensions</strong> — the legal ways to slice a metric (region, plan tier, fiscal month), each bound to a specific column and casing convention, so “by month” can never mean three different date columns.</li>
+    <li><strong>Grain</strong> — the declared row-level meaning of each table: one row per <em>order</em>, per <em>order line</em>, per <em>customer-day</em>. Grain declarations are what make fan-out double-counting detectable <em>before</em> execution rather than after the board meeting.</li>
+    <li><strong>Governed joins</strong> — the explicit graph of permitted join paths with their cardinalities. If <code>orders → customers</code> is declared many-to-one along <code>account_id</code>, the deprecated bridge table simply is not in the graph, and the wrong-join failure class is closed by construction.</li>
+  </ul>
+  <p>The crucial property is that this is a <em>queryable contract</em>, not documentation. The agent does not read a wiki page about revenue and then freestyle SQL; it issues a request like <code>metric=net_revenue, dims=[region, fiscal_month]</code> and the layer compiles the SQL. A request for a metric that doesn’t exist, a dimension that doesn’t apply, or a join that isn’t governed is rejected at compile time. In dbt’s phrasing, which you should tattoo somewhere visible: the system should <strong>“fail loudly rather than be plausibly wrong.”</strong> A compile error costs a retry; a plausible wrong number costs trust, and trust is the actual product of an analytics system. A typical metric declaration is small and boring, which is the point:</p>
+
+<pre><code># semantic_layer/metrics/net_revenue.yml
+metric: net_revenue
+description: >
+  Recognized revenue net of refunds. Excludes internal
+  and test accounts (is_test = false). Fiscal calendar.
+model: fct_order_lines          # grain: one row per order line
+expr: sum(amount_usd) - sum(refund_amount_usd)
+filters:
+  - field: account_type
+    operator: not_in
+    values: [internal, test]
+dimensions: [fiscal_month, region, plan_tier]
+joins:
+  - to: dim_customers
+    type: many_to_one
+    on: account_id
+owner: finance-analytics        # a human team, not a model
+</code></pre>
+
+  <h3>The evidence: same model, different contract</h3>
+  <p>Hold the model fixed and vary only the contract, and the numbers move more than any architecture change of the last three years. Three data points, in increasing order of experimental cleanliness:</p>
+  <ul>
+    <li><strong>Anthropic’s internal self-service analytics</strong> (June 2026 engineering writeup): Claude answering analytics questions over their warehouse scored about <strong>21%</strong> with raw schema access and about <strong>95%</strong> after the data team added curated “skills” — essentially semantic-layer-shaped documents encoding metric definitions, join guidance, and known pitfalls. Same model, 4.5× the accuracy. The expensive ingredient was analyst time spent writing definitions down, not GPUs.</li>
+    <li><strong>Cube’s paired benchmark</strong>: identical questions, identical model, with and without semantic-layer context. Adding roughly a <strong>4 KB</strong> document of metric and join definitions moved accuracy by <strong>+17 to +23 percentage points</strong> across question categories. Four kilobytes. That is the cheapest accuracy intervention ever recorded in this literature — context-efficiency matters because, per Tuesday, the schema alone can be 100K tokens of mostly noise.</li>
+    <li><strong>dbt’s production argument</strong>: routing agent queries through the semantic layer doesn’t just raise accuracy on answerable questions — it converts a chunk of the <em>unanswerable</em> ones from silent wrong numbers into loud compile failures. The accuracy metric improves twice: more correct answers, and fewer confident wrong ones.</li>
+  </ul>
+
+  <div class="pull">A bigger model makes the guess more fluent. <b>Only a contract</b> makes it unnecessary.</div>
+
+  <h3>The trust hierarchy</h3>
+  <p>Real deployments feed agents more than one kind of context, and the kinds are not equally trustworthy. The working ordering, which you should be able to defend on an exam:</p>
+  <p><strong>Semantic layer &gt; lineage &gt; query corpus &gt; business context.</strong> The semantic layer is governed and compiled — it cannot silently drift, because changes go through review and broken references fail builds. Lineage (which tables feed which) is automatically derived, hence accurate but meaning-free: it tells you <code>fct_orders</code> descends from <code>raw_orders</code>, not what either means. The historical query corpus is seductive — “here are 10,000 real queries” — but it encodes every past analyst’s mistakes and deprecated patterns with equal confidence; mining it gives you the warehouse’s folklore, not its law. And free-text business context (wiki pages, Slack) is the richest in meaning and the weakest in guarantees: unversioned, contradictory, and stale by default — the natural habitat of the stale-schema failure bin.</p>
+
+  <figure>
+    <svg viewBox="0 0 800 360" role="img" aria-label="Trust hierarchy of context sources for query agents">
+      <rect x="0" y="0" width="800" height="360" fill="#efe8d8"/>
+      <!-- pyramid layers, hand-drawn feel via slightly irregular polygons -->
+      <polygon points="305,42 497,44 466,106 336,104" fill="none" stroke="#93321b" stroke-width="3"/>
+      <polygon points="252,118 551,120 522,182 281,180" fill="none" stroke="#1d1a15" stroke-width="2.5"/>
+      <polygon points="198,194 605,196 577,258 226,256" fill="none" stroke="#1d1a15" stroke-width="2.5"/>
+      <polygon points="143,270 661,272 648,332 155,330" fill="none" stroke="#1d1a15" stroke-width="2.5" stroke-dasharray="7 5"/>
+      <!-- labels inside layers -->
+      <text x="401" y="80" font-family="monospace" font-size="16" fill="#93321b" text-anchor="middle" font-weight="bold">SEMANTIC LAYER</text>
+      <text x="401" y="98" font-family="monospace" font-size="11" fill="#93321b" text-anchor="middle">governed · compiled · fails loudly</text>
+      <text x="401" y="156" font-family="monospace" font-size="15" fill="#1d1a15" text-anchor="middle">LINEAGE</text>
+      <text x="401" y="174" font-family="monospace" font-size="11" fill="#1d1a15" text-anchor="middle">derived · accurate · meaning-free</text>
+      <text x="401" y="232" font-family="monospace" font-size="15" fill="#1d1a15" text-anchor="middle">QUERY CORPUS</text>
+      <text x="401" y="250" font-family="monospace" font-size="11" fill="#1d1a15" text-anchor="middle">abundant · encodes old mistakes</text>
+      <text x="401" y="306" font-family="monospace" font-size="15" fill="#1d1a15" text-anchor="middle">BUSINESS CONTEXT</text>
+      <text x="401" y="324" font-family="monospace" font-size="11" fill="#1d1a15" text-anchor="middle">rich · unversioned · stale by default</text>
+      <!-- axis arrow -->
+      <line x1="60" y1="320" x2="60" y2="60" stroke="#93321b" stroke-width="2.5"/>
+      <polygon points="60,48 52,68 68,68" fill="#93321b"/>
+      <text x="42" y="200" font-family="monospace" font-size="12" fill="#93321b" transform="rotate(-90 42 200)" text-anchor="middle">TRUST</text>
+      <!-- right annotation -->
+      <line x1="690" y1="74" x2="735" y2="74" stroke="#93321b" stroke-width="2"/>
+      <text x="742" y="68" font-family="monospace" font-size="11" fill="#93321b">route</text>
+      <text x="742" y="82" font-family="monospace" font-size="11" fill="#93321b">here</text>
+      <text x="742" y="96" font-family="monospace" font-size="11" fill="#93321b">first</text>
+    </svg>
+    <figcaption>Fig. 9.1 — The trust hierarchy of agent context. An agent should resolve a question at the highest layer that can answer it, and fall through deliberately — never blend all four with equal weight. The dashed bottom layer is load-bearing for meaning and structurally unreliable; treat it as hypothesis, not ground truth.</figcaption>
+  </figure>
+
+  <p>The operational rule that falls out: an agent should attempt resolution top-down and <em>report which layer answered</em>. “Net revenue by region, resolved via semantic layer” deserves different downstream trust than “…inferred from a 2024 query I found in the corpus,” and surfacing the provenance is what lets humans calibrate.</p>
+
+  <h3>Why LLM-bootstrapping the semantic layer failed</h3>
+  <p>The obvious shortcut occurred to everyone simultaneously around 2025: writing a semantic layer is tedious, models are good at reading schemas and old queries — so have the model generate the semantic layer, then have models query through it. Closed loop, no analysts required. It failed, and it failed for a reason worth stating precisely: <strong>the inputs to bootstrapping are exactly the untrusted layers of the hierarchy.</strong> A model inferring “what does churn mean here?” from the query corpus and the wiki recovers all four ambient definitions of churn, picks the statistically most common one, and enshrines it with the false authority of a governed artifact. You haven’t removed the ambiguity; you’ve laundered it. The semantic layer’s entire value is that a human with organizational authority <em>decided</em> — finance owns <code>net_revenue</code>, the decision survived review, and dissent happened in a pull request rather than in production dashboards. Deciding is not a prediction task.</p>
+  <p>The division of labor that works in practice is narrower and more boring: <strong>humans own definitions; models draft documentation.</strong> A model is excellent at proposing candidate metrics from corpus mining (“these 340 queries all compute something revenue-shaped in three variants — here they are, diffed”), at writing the description fields, at flagging undeclared grain, at noticing that a dimension is referenced but unbound. That’s drafting. The commit — the act that turns a draft into a contract — needs an owner who can be wrong in a way that matters. Note the line in the YAML above: <code>owner: finance-analytics</code>. That field is not metadata decoration; it is the entire governance model in nine characters.</p>
+
+  <div class="aside">
+    <span class="k">Historical aside</span>
+    This is the second time the industry has tried to make meaning machine-readable. The first was the 1990s CASE-tool and enterprise-data-dictionary era, which produced beautiful repositories of definitions that no running system ever consulted — so they rotted. The semantic layer avoids that fate for one mechanical reason: queries are <em>routed through it</em>, so a wrong or stale definition breaks something visible the same day. Specifications survive only when they sit on the execution path. Documentation beside the path is compost.
+  </div>
+
+  <h3>Closing the taxonomy</h3>
+  <p>We can now line Tuesday’s failure bins up against their mitigations and see that each one is addressed by a <em>contract mechanism</em>, not by model improvement:</p>
+
+  <table>
+    <thead>
+      <tr><th>Failure mode</th><th>Root cause</th><th>Mitigation</th><th>Failure becomes…</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>Wrong join</strong> (fan-out, deprecated bridge)</td><td>Join paths and cardinalities undeclared; model infers from names</td><td>Governed join graph + declared grain; compiler rejects paths outside the graph</td><td>Compile-time error (loud)</td></tr>
+      <tr><td><strong>Wrong metric variant</strong> (gross vs. net, fiscal vs. calendar)</td><td>Business logic absent from schema; many plausible readings</td><td>Named, owned metric definitions; agent selects a metric instead of writing an expression</td><td>A clarifying question (“net or gross?”) — the correct behavior</td></tr>
+      <tr><td><strong>Hallucinated column</strong></td><td>Retrieval pressure on 1,000–3,000-column schemas</td><td>Semantic layer as the retrieval surface: small (≈4 KB beats 100K tokens), curated, exhaustively enumerable</td><td>Unresolvable reference, rejected before SQL exists</td></tr>
+      <tr><td><strong>Stale schema</strong></td><td>Unversioned context drifts from the live warehouse</td><td>Layer is versioned and CI-tested against the warehouse; broken references fail the build, not the query</td><td>A failed build owned by a team, pre-production</td></tr>
+    </tbody>
+  </table>
+
+  <p>Read the rightmost column as the week’s summary. In every row, the mitigation does not make the agent smarter — it converts a silent, plausible wrongness into a loud, attributable failure or an honest question. That is the same move that types, schemas, and constraints have always made in database systems. Text-to-SQL was never waiting for a better model. It was waiting, as this course keeps insisting, for somebody to write the specification — and the physics of that hasn’t changed since Codd: systems are reliable exactly to the degree that their contracts are explicit.</p>
+</section>
+
+<section class="block">
+  <div class="sec-label">Readings</div>
+  <h2>Read Before Thursday</h2>
+  <div class="reads-block">
+    <div class="read-row"><div class="n">1</div><div class="t"><i>Spider 2.0: Evaluating Language Models on Real-World Enterprise Text-to-SQL Workflows</i> — Lei et al., ICLR 2025.<span class="v">The 86→17 cliff, quantified. Focus on §3’s task construction and the error analysis: count how many failures are schema-scale or business-logic problems rather than SQL-skill problems.</span></div></div>
+    <div class="read-row"><div class="n">2</div><div class="t"><i>Can LLM Already Serve as a Database Interface? A BIg Bench for Large-Scale Database Grounded Text-to-SQLs (BIRD)</i> — Li et al., NeurIPS 2023.<span class="v">Read for the “external knowledge” design decision — the first benchmark to admit questions underdetermine SQL — and bring a skeptical eye to the gold annotations; we discuss the audit findings in class.</span></div></div>
+    <div class="read-row"><div class="n">3</div><div class="t"><i>How Anthropic Built Self-Service Analytics with Claude</i> — Anthropic engineering blog, June 2026.<span class="v">The 21→95 result. Focus on what the curated skills actually contain (metric definitions, join guidance, pitfalls) and who maintains them — it is a semantic layer in everything but name.</span></div></div>
+  </div>
+</section>
+
+<section class="block">
+  <div class="sec-label">Exercises</div>
+  <h2>This Week’s Problems</h2>
+  <div class="exercise">
+    <div class="ex-head">Exercise 9.1 · warm-up</div>
+    <div class="ex-body"><p>Take the question “How many active customers did we have last month?” and write down <strong>four</strong> materially different but individually defensible SQL interpretations (vary the definition of <em>active</em>, the calendar, and the customer-population filter). For each, name which failure bin from Tuesday’s taxonomy an agent would land in if it silently picked that reading when the asker meant another. Then write the one-paragraph semantic-layer entry for <code>active_customers</code> that would force the ambiguity to surface as a question instead.</p></div>
+  </div>
+  <div class="exercise">
+    <div class="ex-head">Exercise 9.2 · core</div>
+    <div class="ex-body"><p>Using the lab’s 400-column retail warehouse: (a) run the provided 25-question evaluation against a frontier model given only the raw schema dump, and bucket every failure into the four-bin taxonomy; (b) write a semantic layer of at most <strong>4 KB</strong> — metrics, dimensions, grain, governed joins, in the YAML style from lecture — covering the ten metrics the questions need; (c) re-run with the model required to route through your layer, and report the accuracy delta per bin. You are graded on the error analysis, not the headline number: which bins did your 4 KB close, which survived, and why? (Reference point: Cube’s paired benchmark gained +17–23pp from a comparable artifact.)</p></div>
+  </div>
+  <div class="exercise">
+    <div class="ex-head">Exercise 9.3 · stretch</div>
+    <div class="ex-body"><p>Lecture 2 claims LLM-bootstrapping fails because it launders ambiguity — but the argument is qualitative. Design and run an experiment that measures it. Have a model mine the lab warehouse’s query corpus (provided: ~3,000 historical queries containing at least three latent variants of “revenue”) and auto-generate a semantic layer; then evaluate agents through the bootstrapped layer vs. your hand-written 9.2 layer vs. no layer. The hard parts you must solve, not hand-wave: (1) a metric for <em>definition consistency</em> distinct from execution accuracy — a bootstrapped layer can be internally consistent and uniformly wrong, and your metric must separate those; (2) an audit protocol that detects which corpus variant the bootstrap enshrined and whether it matches the (sealed) finance-approved definition; (3) a proposal, with measurements, for the highest-leverage <em>partial</em> automation — what is the largest slice of layer authoring a model can own before consistency degrades, and can you locate the knee of that curve? Write it up as a 4-page workshop paper. Genuinely open: a strong negative result is publishable.</p></div>
+  </div>
+  <div class="fleuron">❦</div>
+</section>
+
+<nav class="pager">
+  <a href="week-08.html"><span class="dir">← Week 08</span><span class="ttl">Transactions &amp; Branching for Agent Swarms</span></a>
+  <a class="next" href="week-10.html"><span class="dir">Week 10 →</span><span class="ttl">Semantic Operators</span></a>
+</nav>
+
+</main>
+
+<footer class="site">
+  <div class="inner">
+    <span>DATA 2027 — a course that doesn’t exist yet · <a href="../index.html">Essay № 01</a> · <a href="../course.html">Essay № 02</a></span>
+    <span>CC BY 4.0 · built with <a href="https://claude.com/claude-code">Claude Code</a></span>
+  </div>
+</footer>
+
+</body>
+</html>

@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Week 4: Disaggregation &amp; Elasticity — DATA 2027</title>
+<meta name="description" content="Aurora ships only the log; Snowflake rents compute over object storage; Neon turns the buffer pool into the whole architecture. Week 4 of DATA 2027.">
+<meta name="theme-color" content="#f6f1e7">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23f6f1e7'/%3E%3Cellipse cx='50' cy='28' rx='30' ry='12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 28v44c0 6.6 13.4 12 30 12s30-5.4 30-12V28' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 50c0 6.6 13.4 12 30 12s30-5.4 30-12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500;9..144,600;9..144,900&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400;1,6..72,500&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="course.css">
+</head>
+<body>
+
+<div class="masthead">
+  <span><a href="index.html">DATA 2027</a> <span class="dot">●</span> DATA SYSTEMS IN THE AGENTIC ERA</span>
+  <span><a href="index.html">← SCHEDULE</a></span>
+</div>
+
+<header class="page-head">
+  <div class="kicker">Week 04 · Part I — Foundations Under New Workloads</div>
+  <h1>Disaggregation &amp; <em>Elasticity</em></h1>
+  <p class="standfirst">In 2016 Snowflake said the warehouse is just rented compute over object storage; in 2017 Amazon said the log is the database. This week we take both claims literally and follow them to their endpoint: a database whose buffer pool became the entire architecture.</p>
+  <div class="meta"><b>Lectures:</b> Tue — Aurora: the log is the database · Thu — Snowflake and the elastic warehouse &nbsp;·&nbsp; <b>Lab:</b> Fri — Neon branching: one database per agent experiment</div>
+</header>
+
+<main>
+
+<section class="block">
+  <div class="objectives">
+    <div class="k">Learning objectives — after this week you can…</div>
+    <ul>
+      <li>Quantify write amplification in traditional replicated databases and explain why shipping only the redo log collapses it by two orders of magnitude.</li>
+      <li>Reconstruct Aurora’s 6-way quorum (4/6 write, 3/6 read) from first principles of the AZ+1 failure model, and explain why 10&nbsp;GB segments make repair fast enough for the math to hold.</li>
+      <li>Describe Snowflake’s three-layer split and trace how immutable micro-partitions enable pruning, time travel, and zero-copy cloning.</li>
+      <li>Walk a <code>GetPage@LSN</code> request through Neon’s safekeeper → pageserver → S3 pipeline, and explain why a copy-on-write branch costs almost nothing to create.</li>
+      <li>Argue, with cost arithmetic, when scale-to-zero and branch-per-experiment make disaggregated storage the right substrate for agent workloads.</li>
+    </ul>
+  </div>
+</section>
+
+<section class="block">
+  <div class="sec-label">Lecture 1 · Tuesday</div>
+  <h2>Aurora: the Log Is the Database</h2>
+
+  <p class="opener">Every durable database already contains two complete descriptions of its state: the data pages, and the redo log that produced them. They are informationally redundant — given the log, you can rebuild every page. For forty years we shipped <em>both</em> across every replication boundary, because networks were slow and disks were local, so materializing pages eagerly everywhere seemed obviously right. Aurora’s insight (Verbitski et al., SIGMOD 2017) is brutal in its simplicity: in a cloud datacenter, where the network is fast and the storage fleet can run code, shipping pages is pure waste. Ship only the log. Let storage materialize pages itself, lazily, close to the disks. Everything else in the paper — the quorum, the segments, the recovery story — falls out of that one decision.</p>
+
+  <h3>The write amplification problem</h3>
+  <p>Start by counting what a conventional highly-available MySQL writes per transaction. InnoDB writes the redo log record, the data page itself (16&nbsp;KB, even if you changed 120 bytes of it), and a second copy of the page to the double-write buffer to guard against torn writes. MySQL also writes the binlog for replication, plus assorted metadata. Now mirror that instance for HA: networked block storage typically replicates each of those writes again, and a hot standby repeats the entire set on its own mirrored volumes. The Aurora paper’s Figure&nbsp;2 counts the same logical write traveling the network and hitting media many times over — and several of those writes are sequential <em>and synchronous</em>, so latency stacks.</p>
+  <p>Make it concrete. A transaction updates 10 rows spread over 8 pages. Mirrored MySQL moves roughly 8&nbsp;×&nbsp;16&nbsp;KB of pages, doubled by the double-write buffer, plus log and binlog — then the whole bundle is replayed down a second instance’s stack: comfortably over half a megabyte of writes for a few hundred bytes of intent. Aurora sends 10 redo records of ~100 bytes each to six storage nodes: about 6&nbsp;KB total. That is roughly a 100× reduction, and it shows up in the paper’s headline benchmark: over a 30-minute SysBench write-only run, Aurora completed 35× more transactions than mirrored MySQL while issuing 7.7× fewer I/Os per transaction. The transaction’s intent is small; only our habits made it big.</p>
+
+  <h3>Only the log crosses the network</h3>
+  <p>In Aurora the primary instance still runs InnoDB’s parser, optimizer, transactions, and buffer pool — but the only thing it ever <em>writes</em> is redo records. Each record is tagged with its log sequence number (LSN), grouped by the 10&nbsp;GB storage segment it belongs to, and streamed to the six replicas of that segment. Commit is asynchronous and quorum-based: a worker thread marks a transaction durable once the volume durable LSN (the highest point at which the log is known complete on a write quorum) passes the transaction’s commit LSN. No page ever crosses the wire in the write path. The primary doesn’t even checkpoint in the traditional sense — checkpointing has been delegated to storage, which is continuously, incrementally applying the log it already holds.</p>
+
+  <h3>Quorum math for three availability zones</h3>
+  <p>Why six copies, and why 4/6 and 3/6? Quorum systems need two inequalities: the read and write quorums must intersect (V<sub>r</sub>&nbsp;+&nbsp;V<sub>w</sub>&nbsp;&gt;&nbsp;V), and two writes must intersect (V<sub>w</sub>&nbsp;&gt;&nbsp;V/2). A 2/3 scheme satisfies both, and that’s what most systems used. Aurora rejects it because of correlated failure: in AWS, an entire availability zone can vanish — fire, flood, a bad network push — and failures of individual nodes (disk dies, top-of-rack flaps) continue at background rates regardless. The design target is <strong>AZ+1</strong>: lose a whole AZ <em>plus</em> one unrelated node, and you must not lose data. With 2/3 across three AZs, AZ+1 destroys two of three copies — quorum gone. So: six copies, two per AZ. Losing an AZ (−2) leaves 4/6, so writes continue. Losing AZ+1 (−3) leaves 3/6: writes stall, but the read quorum still stands, so no data is lost and the system can rebuild fresh copies and resume.</p>
+  <p>The subtle half of the argument is repair speed, because a quorum is only as good as the time you spend degraded. Aurora carves the volume into 10&nbsp;GB protection groups precisely so that re-replicating a lost segment over a 10&nbsp;Gbps link takes about ten seconds. For double failure to hurt you, the second failure must land inside that ten-second window <em>in the same protection group</em>. Big segments would stretch that window to minutes or hours and quietly invalidate the whole availability story. Durability is a race between failure rate and repair rate, and Aurora wins it by making the unit of repair small.</p>
+
+  <h3>Storage nodes materialize the pages</h3>
+  <p>Each storage node runs a small pipeline. Foreground: receive redo records, append to an in-memory queue, persist, ACK. That’s the entire latency-critical path — two steps. Everything else is background: sort records by LSN, gossip with peer replicas to fill holes in the log, coalesce redo onto data pages, back up log and pages to S3 continuously, garbage-collect superseded versions, and scrub blocks against checksums. When the database later reads a page, the storage node returns a materialized page at the requested LSN — applying any not-yet-coalesced redo on demand.</p>
+  <p>This inverts crash recovery. Traditional recovery replays the log from the last checkpoint <em>before opening for business</em> — minutes of downtime proportional to log backlog. Aurora’s storage is always applying the log, so on crash the database re-establishes the durable LSN by quorum reads and opens immediately; pages are brought to consistency lazily, on first touch. Recovery time stops being a function of how much work was in flight. The log is not a recovery aid for the database; the log <em>is</em> the database, and pages are merely a cache of its prefix sums.</p>
+
+  <div class="aside">
+    <span class="k">Field note</span>
+    A team I worked with once ran the AZ+1 drill for real: an AZ-wide network partition during a deploy, then twenty minutes in, a routine disk failure took a storage node. On a 2/3 system that’s a data-loss incident. On the 6-way layout it was an on-call engineer watching repair jobs re-replicate 10&nbsp;GB segments while the database kept serving reads. Nobody got paged because of the quorum — only because a dashboard turned yellow.
+  </div>
+</section>
+
+<section class="block">
+  <div class="sec-label">Lecture 2 · Thursday</div>
+  <h2>Snowflake and the Elastic Warehouse</h2>
+
+  <p class="opener">Aurora disaggregated storage but kept compute monogamous: one primary writes, replicas read, and the unit you scale is still “a database instance.” Snowflake (Dageville et al., SIGMOD 2016) went further and made compute promiscuous. Storage is just S3. Compute is a fleet of <em>virtual warehouses</em> — clusters of EC2 nodes you summon, resize, and dismiss like contractors — and any number of them can work over the same data simultaneously without coordinating, because the data is immutable and the metadata lives in a third, separately-scaled service tier. Aurora asked “what if storage understood the log?” Snowflake asked “what if compute owned nothing at all?”</p>
+
+  <h3>Three layers, three failure and scaling domains</h3>
+  <p>Snowflake splits into: <strong>cloud services</strong> (a multi-tenant, replicated brain holding the catalog, transaction manager, optimizer, and access control), <strong>virtual warehouses</strong> (stateless worker clusters with local SSD acting purely as cache), and <strong>storage</strong> (S3, which is slow at first byte but has effectively unbounded aggregate bandwidth and eleven nines of durability). The layers scale independently: a metadata-heavy workload stresses services; a giant join stresses a warehouse; nothing ever stresses S3. Crucially, a warehouse failure loses no state — kill every node mid-query and you’ve lost cache and in-flight work, never data. That property is what makes elasticity <em>safe</em>, not merely possible: you can only treat compute as disposable if it was never entrusted with anything.</p>
+
+  <h3>Immutable micro-partitions and pruning</h3>
+  <p>Tables are stored as <strong>micro-partitions</strong>: immutable files each holding roughly 50–500&nbsp;MB of uncompressed data, internally columnar (a PAX-style hybrid layout), heavily compressed per column. Writes never modify a file; they write new files and update metadata to swap them in — an update to one row rewrites that row’s micro-partition. That sounds wasteful until you notice what immutability buys. First, <em>pruning</em>: cloud services keep min/max values (zone maps) per column per micro-partition, so <code>WHERE event_date = '2026-06-09'</code> over a 100,000-partition table touches only the partitions whose range can contain that date — 99%+ of I/O eliminated before a single byte leaves S3. There are no B-tree indexes in Snowflake; pruning over sorted-ish data <em>is</em> the index. Second, <em>time travel</em>: old micro-partitions stick around for a retention window, so querying the table “as of” an hour ago is just resolving an older file list. Third, <em>zero-copy cloning</em>: a clone of a 50&nbsp;TB table is a metadata entry pointing at the same files. Versioning collapses into bookkeeping.</p>
+
+  <h3>The economics of elasticity</h3>
+  <p>The deep argument for disaggregation is economic, and it’s one line: <strong>100 machines for 1 hour costs the same as 1 machine for 100 hours — but only one of them returns your answer today.</strong> In a coupled architecture you can’t exploit that identity, because adding machines means re-sharding data, which takes longer than the query. With state in S3 and compute stateless, a warehouse resize is just “boot more nodes and warm their caches.” Per-second billing plus auto-suspend turns capacity planning into a control loop: a nightly transform that needs 64 nodes for 9 minutes costs about the same as one node grinding for 9.6 hours, and an analyst’s warehouse that’s idle 95% of the day costs 5% of list price. The 2020 NSDI follow-up (Vuppalapati et al.), written from production telemetry, confirms the bet and reports the honest residue: real workloads are violently bursty, local SSD caches achieve high hit rates despite holding a sliver of total data (access skew is your friend), and the unsolved annoyance is <em>intermediate</em> data — shuffle and spill during a big join wants storage that is neither as expensive as RAM nor as far away as S3.</p>
+
+  <h3>Neon: Postgres, taken apart along the same seam</h3>
+  <p>Neon applies the Aurora cut to open-source Postgres, with a cleaner separation and one killer API. Postgres runs unmodified above the storage layer and is <em>stateless</em>: no data directory that matters. Its WAL streams to a trio of <strong>safekeepers</strong>, which run a Paxos-style consensus to decide the durable WAL frontier — commit means a quorum of safekeepers has the bytes. Downstream, <strong>pageservers</strong> ingest the WAL, reorganize it into immutable layer files (delta layers holding WAL slices, image layers holding materialized pages), cache them on local NVMe, and tier everything to S3. When Postgres misses in its buffer pool, it doesn’t read a disk — it issues an RPC:</p>
+  <pre><code>GetPage@LSN(tenant, timeline, rel, blkno, lsn) → 8 KB page image</code></pre>
+  <p>Read that signature slowly, because it’s the thesis of the week. The page is requested <em>at an LSN</em> — at a point in logical time. The pageserver reconstructs it by finding the newest image layer at or below that LSN and applying any delta records between. Once pages are addressable by (block, time), a <strong>branch</strong> is trivially cheap: it’s a new timeline defined as “parent timeline up to LSN&nbsp;L, plus my own WAL after.” Creating one copies nothing — reads of unmodified pages resolve through the parent’s layers, copy-on-write, exactly like a Git branch sharing history. A 2&nbsp;TB database branches in roughly a second, and a hundred branches that diverge by a few megabytes each cost a few hundred megabytes total.</p>
+
+  <figure>
+    <svg viewBox="0 0 800 360" role="img" aria-label="Diagram comparing Aurora and Neon data flow" font-family="monospace">
+      <rect x="0" y="0" width="800" height="360" fill="#efe8d8"/>
+      <line x1="400" y1="16" x2="400" y2="344" stroke="#1d1a15" stroke-width="1" stroke-dasharray="3 6"/>
+      <text x="190" y="32" font-size="14" fill="#93321b" text-anchor="middle" font-weight="bold">AURORA</text>
+      <text x="600" y="32" font-size="14" fill="#93321b" text-anchor="middle" font-weight="bold">NEON</text>
+
+      <!-- Aurora primary -->
+      <rect x="90" y="48" width="200" height="44" fill="none" stroke="#1d1a15" stroke-width="2"/>
+      <text x="190" y="68" font-size="12" fill="#1d1a15" text-anchor="middle">PRIMARY (InnoDB)</text>
+      <text x="190" y="84" font-size="10" fill="#1d1a15" text-anchor="middle">SQL · txns · buffer pool</text>
+
+      <!-- redo fan-out -->
+      <path d="M190 92 C 150 130, 90 140, 62 168" fill="none" stroke="#93321b" stroke-width="2"/>
+      <path d="M190 92 C 175 132, 145 142, 128 168" fill="none" stroke="#93321b" stroke-width="2"/>
+      <path d="M190 92 C 192 130, 192 140, 192 168" fill="none" stroke="#93321b" stroke-width="2"/>
+      <path d="M190 92 C 205 132, 240 142, 256 168" fill="none" stroke="#93321b" stroke-width="2"/>
+      <path d="M190 92 C 230 130, 295 140, 322 168" fill="none" stroke="#93321b" stroke-width="2"/>
+      <text x="190" y="118" font-size="11" fill="#93321b" text-anchor="middle">redo records only</text>
+      <text x="190" y="132" font-size="10" fill="#93321b" text-anchor="middle">(~100 B, no pages)</text>
+
+      <!-- 6 storage nodes, 2 per AZ -->
+      <rect x="38" y="170" width="48" height="34" fill="none" stroke="#1d1a15" stroke-width="2"/>
+      <rect x="92" y="170" width="48" height="34" fill="none" stroke="#1d1a15" stroke-width="2"/>
+      <rect x="156" y="170" width="48" height="34" fill="none" stroke="#1d1a15" stroke-width="2"/>
+      <rect x="210" y="170" width="48" height="34" fill="none" stroke="#1d1a15" stroke-width="2"/>
+      <rect x="274" y="170" width="48" height="34" fill="none" stroke="#1d1a15" stroke-width="2"/>
+      <rect x="328" y="170" width="48" height="34" fill="none" stroke="#1d1a15" stroke-width="2"/>
+      <text x="62" y="191" font-size="10" fill="#1d1a15" text-anchor="middle">SN1</text>
+      <text x="116" y="191" font-size="10" fill="#1d1a15" text-anchor="middle">SN2</text>
+      <text x="180" y="191" font-size="10" fill="#1d1a15" text-anchor="middle">SN3</text>
+      <text x="234" y="191" font-size="10" fill="#1d1a15" text-anchor="middle">SN4</text>
+      <text x="298" y="191" font-size="10" fill="#1d1a15" text-anchor="middle">SN5</text>
+      <text x="352" y="191" font-size="10" fill="#1d1a15" text-anchor="middle">SN6</text>
+      <text x="89" y="222" font-size="10" fill="#1d1a15" text-anchor="middle">AZ-a</text>
+      <text x="207" y="222" font-size="10" fill="#1d1a15" text-anchor="middle">AZ-b</text>
+      <text x="325" y="222" font-size="10" fill="#1d1a15" text-anchor="middle">AZ-c</text>
+      <text x="190" y="248" font-size="11" fill="#93321b" text-anchor="middle">ACK at 4/6 write quorum · read 3/6</text>
+      <text x="190" y="266" font-size="10" fill="#1d1a15" text-anchor="middle">storage nodes coalesce redo → pages,</text>
+      <text x="190" y="280" font-size="10" fill="#1d1a15" text-anchor="middle">gossip holes, back up to S3</text>
+
+      <!-- Neon compute -->
+      <rect x="500" y="48" width="200" height="44" fill="none" stroke="#1d1a15" stroke-width="2"/>
+      <text x="600" y="68" font-size="12" fill="#1d1a15" text-anchor="middle">POSTGRES (stateless)</text>
+      <text x="600" y="84" font-size="10" fill="#1d1a15" text-anchor="middle">scale to zero when idle</text>
+
+      <!-- WAL to safekeepers -->
+      <path d="M560 92 C 545 110, 535 118, 528 132" fill="none" stroke="#93321b" stroke-width="2"/>
+      <text x="498" y="116" font-size="11" fill="#93321b" text-anchor="middle">WAL</text>
+      <rect x="448" y="134" width="50" height="32" fill="none" stroke="#1d1a15" stroke-width="2"/>
+      <rect x="506" y="134" width="50" height="32" fill="none" stroke="#1d1a15" stroke-width="2"/>
+      <rect x="564" y="134" width="50" height="32" fill="none" stroke="#1d1a15" stroke-width="2"/>
+      <text x="531" y="154" font-size="10" fill="#1d1a15" text-anchor="middle">SAFEKEEPERS</text>
+      <text x="531" y="182" font-size="10" fill="#93321b" text-anchor="middle">paxos quorum 2/3</text>
+
+      <!-- safekeepers to pageserver -->
+      <path d="M531 196 C 531 210, 545 218, 560 226" fill="none" stroke="#93321b" stroke-width="2"/>
+      <rect x="500" y="228" width="200" height="40" fill="none" stroke="#1d1a15" stroke-width="2"/>
+      <text x="600" y="246" font-size="12" fill="#1d1a15" text-anchor="middle">PAGESERVER</text>
+      <text x="600" y="260" font-size="10" fill="#1d1a15" text-anchor="middle">layer files · NVMe cache</text>
+
+      <!-- GetPage@LSN back edge -->
+      <path d="M700 240 C 745 210, 745 130, 702 78" fill="none" stroke="#93321b" stroke-width="2" stroke-dasharray="5 4"/>
+      <path d="M702 78 l 12 2 m -12 -2 l 4 11" fill="none" stroke="#93321b" stroke-width="2"/>
+      <text x="762" y="162" font-size="11" fill="#93321b" text-anchor="middle">GetPage</text>
+      <text x="762" y="176" font-size="11" fill="#93321b" text-anchor="middle">@LSN</text>
+
+      <!-- pageserver to S3 -->
+      <path d="M600 268 C 600 282, 600 288, 600 296" fill="none" stroke="#93321b" stroke-width="2"/>
+      <ellipse cx="600" cy="306" rx="80" ry="9" fill="none" stroke="#1d1a15" stroke-width="2"/>
+      <path d="M520 306 v22 c0 5 36 9 80 9 s80 -4 80 -9 v-22" fill="none" stroke="#1d1a15" stroke-width="2"/>
+      <text x="600" y="328" font-size="11" fill="#1d1a15" text-anchor="middle">S3 · immutable layers</text>
+      <text x="468" y="306" font-size="10" fill="#93321b" text-anchor="end">CoW branches =</text>
+      <text x="468" y="320" font-size="10" fill="#93321b" text-anchor="end">(parent, LSN)</text>
+    </svg>
+    <figcaption>Fig. 4.1 — Two cuts through the same idea. Aurora (left): the primary ships ~100-byte redo records to six storage nodes (two per AZ); commit waits for 4/6, reads need 3/6, and page materialization happens inside storage. Neon (right): WAL is made durable by a Paxos quorum of safekeepers, pageservers reorganize it into immutable layers tiered to S3, and stateless Postgres fetches pages on demand via GetPage@LSN — which is also what makes copy-on-write branches free.</figcaption>
+  </figure>
+
+  <table>
+    <thead>
+      <tr><th>Axis</th><th>Aurora (2017)</th><th>Snowflake (2016)</th><th>Neon (2020s)</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>What crosses the network on write</td><td>Redo records only</td><td>New micro-partition files</td><td>WAL stream</td></tr>
+      <tr><td>Durability mechanism</td><td>4/6 quorum over 3 AZs</td><td>S3 + replicated metadata</td><td>2/3 Paxos on safekeepers, then S3</td></tr>
+      <tr><td>Unit of elasticity</td><td>Read replicas (writes: one primary)</td><td>Whole virtual warehouses, per second</td><td>Compute scales to zero per branch</td></tr>
+      <tr><td>Page/file materialization</td><td>Storage nodes coalesce redo</td><td>Compute writes immutable files</td><td>Pageservers build delta + image layers</td></tr>
+      <tr><td>Cost of a full copy</td><td>Volume clone (CoW, fast)</td><td>Zero-copy clone (metadata)</td><td>Branch = (parent, LSN), ~1 second</td></tr>
+    </tbody>
+  </table>
+
+  <h3>The agent angle: seismograph demand curves</h3>
+  <p>Why does this week sit in a course about agents? Look at the load profile an agent fleet generates. Human-driven OLTP is a diurnal sine wave; you provision for the afternoon peak and eat the overnight waste. Agents produce a <em>seismograph</em>: a flat line of near-zero, then a workflow fires and 400 concurrent sessions appear within two seconds, run hot for ninety seconds, and vanish. The duty cycle can be under 1%. Provisioned-for-peak hardware at a 1% duty cycle is a 100× cost penalty; only scale-to-zero compute over disaggregated storage prices that curve honestly. Neon suspends an idle compute in minutes and cold-starts it in well under a second of compute boot plus cache warming — acceptable to an agent that just spent four seconds thinking about what query to write.</p>
+  <p>Second, agents are reckless in exactly the way branches make safe. A migration-writing agent should never rehearse <code>ALTER TABLE</code> against the production timeline; it should branch, apply, check, then promote or delete. At human scale that workflow meant a weekend restoring dumps onto a staging box. At agent scale — hundreds of experiments a day — it is feasible only because a branch costs one second and zero bytes up front. <strong>Branch-per-experiment is not a convenience feature; it is the isolation mechanism for a client that ships code faster than you can review it.</strong> Disaggregation is the precondition: copy-on-write across experiments only works when all experiments share one storage substrate addressed by (page, LSN).</p>
+  <p>Third, notice what happened to the humble buffer pool. In 1981 it was a few megabytes of RAM in front of a local disk. In these systems the cache hierarchy <em>is</em> the architecture: Postgres shared buffers (~100&nbsp;ns) miss to pageserver or warehouse NVMe (~100&nbsp;µs) miss to S3 (tens of milliseconds to first byte, but ~$0.023/GB·month and request-priced GETs). Every design decision this week — what to materialize where, what to keep hot, what an acceptable miss costs — is a buffer-pool policy question scaled up to datacenter size. The five-minute rule from Week 2 didn’t retire; it got promoted to chief architect.</p>
+
+  <div class="pull">The buffer pool didn’t disappear into the cloud — <b>it became the architecture.</b></div>
+
+  <div class="aside">
+    <span class="k">Historical aside</span>
+    We litigated this once before. Stonebraker’s 1986 “The Case for Shared Nothing” won the argument against shared-disk designs like IBM’s and later Oracle RAC, largely because 1980s networks were slow and cache-coherence across nodes was agony. Snowflake and Aurora are shared-<em>disk</em> architectures that won anyway — because S3 changed the constants (unbounded bandwidth, eleven nines) and because both systems quietly dodged coherence: Aurora allows one writer; Snowflake makes data immutable. The physics didn’t change. The constants did, and the constants were the argument.
+  </div>
+</section>
+
+<section class="block">
+  <div class="sec-label">Readings</div>
+  <h2>Read Before Thursday</h2>
+  <div class="reads-block">
+    <div class="read-row"><div class="n">1</div><div class="t"><i>Amazon Aurora: Design Considerations for High Throughput Cloud-Native Relational Databases</i> — Verbitski et al., SIGMOD 2017.<span class="v">The canonical “ship only the log” paper. Focus on §2–3: the write amplification accounting in Figure 2, and derive the 4/6–3/6 quorum from the AZ+1 model yourself before reading their derivation.</span></div></div>
+    <div class="read-row"><div class="n">2</div><div class="t"><i>The Snowflake Elastic Data Warehouse</i> — Dageville et al., SIGMOD 2016.<span class="v">Read for the three-layer architecture and §3.3 on micro-partitions and pruning. Ask at every section: which property here is enabled by immutability alone?</span></div></div>
+    <div class="read-row"><div class="n">3</div><div class="t"><i>Building an Elastic Query Engine on Disaggregated Storage</i> — Vuppalapati et al., NSDI 2020.<span class="v">The production retrospective: what the 2016 bet got right, measured. Focus on the workload skew and cache hit-rate data, and the open problem of intermediate (shuffle/spill) data.</span></div></div>
+  </div>
+</section>
+
+<section class="block">
+  <div class="sec-label">Exercises</div>
+  <h2>This Week’s Problems</h2>
+  <div class="exercise">
+    <div class="ex-head">Exercise 4.1 · warm-up</div>
+    <div class="ex-body"><p>A transaction updates 200 bytes spread across 5 distinct 16&nbsp;KB pages. Count the bytes that cross the network to achieve durable, replicated commit in (a) a mirrored MySQL pair where each instance writes data pages, a double-write buffer copy, redo, and binlog to network-attached storage that itself mirrors every write; and (b) Aurora, assuming 120-byte redo records and 6 storage replicas. State your assumptions explicitly, compute the amplification ratio, and identify which writes in (a) are on the synchronous commit path versus deferrable.</p></div>
+  </div>
+  <div class="exercise">
+    <div class="ex-head">Exercise 4.2 · core</div>
+    <div class="ex-body"><p>Aurora chose V=6, V<sub>w</sub>=4, V<sub>r</sub>=3 over three AZs. (a) Show that 3/5 and 2/3 schemes each violate some part of the AZ+1 requirement, stating the placement of copies across AZs in each case. (b) Compute the expected window of vulnerability for a protection group: with 10&nbsp;GB segments re-replicated at 10&nbsp;Gbps, how long is the system one-failure-from-data-loss after an AZ+1 event, and how does that change with 100&nbsp;GB segments at the same bandwidth? (c) Suppose AWS adds a fourth AZ. Propose a quorum (V, V<sub>w</sub>, V<sub>r</sub>, placement) that tolerates AZ+1 with the minimum total copies, and argue why Aurora might still decline to use it.</p></div>
+  </div>
+  <div class="exercise">
+    <div class="ex-head">Exercise 4.3 · stretch</div>
+    <div class="ex-body"><p>Design the storage layer for a “branch-per-agent-experiment” service on a Neon-like substrate. Assumptions: one 2&nbsp;TB parent database; 10,000 branches created per day; the median branch lives 11 minutes, writes 40&nbsp;MB of WAL, issues 50,000 <code>GetPage@LSN</code> reads (80% within 2&nbsp;GB of hot pages shared with the parent), and is then deleted; 1% of branches are promoted and live indefinitely. Specify: (a) your layer-file design and a compaction policy that bounds read amplification for a page at an arbitrary LSN on an arbitrary branch — define read amplification precisely and prove your bound; (b) the pageserver NVMe cache size and admission policy that keeps p99 GetPage latency under 1&nbsp;ms for the 80% hot set, with arithmetic; (c) a monthly cost model (S3 storage at $0.023/GB, GETs at $0.0004/1k, your chosen NVMe instance pricing) and the break-even duty cycle at which always-on provisioned replicas beat scale-to-zero; (d) the failure analysis: what happens to in-flight branches when a pageserver dies, and what invariant must the safekeepers preserve for your answer to hold? You will be graded on the precision of your invariants and the honesty of your arithmetic.</p></div>
+  </div>
+  <div class="fleuron">❦</div>
+</section>
+
+<nav class="pager">
+  <a href="week-03.html"><span class="dir">← Week 03</span><span class="ttl">One Size Fits None</span></a>
+  <a class="next" href="week-05.html"><span class="dir">Week 05 →</span><span class="ttl">Learned Components</span></a>
+</nav>
+
+</main>
+
+<footer class="site">
+  <div class="inner">
+    <span>DATA 2027 — a course that doesn’t exist yet · <a href="../index.html">Essay № 01</a> · <a href="../course.html">Essay № 02</a></span>
+    <span>CC BY 4.0 · built with <a href="https://claude.com/claude-code">Claude Code</a></span>
+  </div>
+</footer>
+
+</body>
+</html>

@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Week 3: One Size Fits None — DATA 2027</title>
+<meta name="description" content="Column stores, compression, and vectorized execution — why analytical engines abandoned the row and the tuple, and why agent-driven analytics makes that bet pay off twice.">
+<meta name="theme-color" content="#f6f1e7">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23f6f1e7'/%3E%3Cellipse cx='50' cy='28' rx='30' ry='12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 28v44c0 6.6 13.4 12 30 12s30-5.4 30-12V28' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 50c0 6.6 13.4 12 30 12s30-5.4 30-12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500;9..144,600;9..144,900&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400;1,6..72,500&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="course.css">
+</head>
+<body>
+
+<div class="masthead">
+  <span><a href="index.html">DATA 2027</a> <span class="dot">●</span> DATA SYSTEMS IN THE AGENTIC ERA</span>
+  <span><a href="index.html">← SCHEDULE</a></span>
+</div>
+
+<header class="page-head">
+  <div class="kicker">Week 03 · Part I — Foundations Under New Workloads</div>
+  <h1>One Size Fits <em>None</em></h1>
+  <p class="standfirst">In 2005 Stonebraker declared the one-engine-for-everything era over, and the column store proved him right with a 50× scan speedup. This week we dissect why columns beat rows for analytics — and why batched, vectorized execution beats the elegant Volcano iterator that every textbook still teaches.</p>
+  <div class="meta"><b>Lectures:</b> Tue — The column-store argument · Thu — Vectorized execution: from tuple-at-a-time to batches &nbsp;·&nbsp; <b>Lab:</b> Fri — Profile a scan: row vs. columnar layout, perf counters in hand</div>
+</header>
+
+<main>
+
+<section class="block">
+  <div class="objectives">
+    <div class="k">Learning objectives — after this week you can…</div>
+    <ul>
+      <li>Reconstruct Stonebraker’s “one size fits all” argument and apply its method — workload analysis first, architecture second — to a new workload class.</li>
+      <li>Compute compression ratios for RLE, dictionary, and bit-packed encodings on a concrete column, and explain when each wins.</li>
+      <li>Explain late materialization and C-Store projections, and trace which columns a given query actually touches.</li>
+      <li>Quantify the per-tuple overhead of the Volcano iterator model and explain how ~1000-value vectors amortize it while staying cache-resident.</li>
+      <li>Argue, with numbers, why scan-dominant speculative agent analytics favors columnar formats (Parquet/Arrow) plus vectorized engines with cheap startup.</li>
+    </ul>
+  </div>
+</section>
+
+<section class="block">
+  <div class="sec-label">Lecture 1 · Tuesday</div>
+  <h2>The Column-Store Argument</h2>
+
+  <p class="opener">Michael Stonebraker’s 2005 ICDE paper “One Size Fits All: An Idea Whose Time Has Come and Gone” is a polemic, and we should read it as one — not for its specific predictions (some aged badly) but for its <strong>method</strong>. The argument runs: commercial RDBMSs of the era were all descendants of System R, tuned for the workload of 1985 — OLTP, write-heavy, short transactions, terminals operated by humans. By 2005 the actual workload population had diversified: stream processing, scientific arrays, text, warehousing. Stonebraker’s move was to take one workload class, design an engine for <em>it alone</em>, and measure the gap against the general-purpose incumbent. For warehousing, that purpose-built engine was C-Store, and the gap wasn’t 20% — it was one to two orders of magnitude. When a specialized design beats the generalist by 50×, the generalist isn’t a compromise; it’s a category error. That method — pick the workload, derive the architecture, measure the gap — is the method of this entire course, because agents are exactly the kind of new workload class that the method demands we take seriously.</p>
+
+  <h3>Rows are an OLTP decision, not a law of nature</h3>
+  <p>A row store lays a tuple’s attributes contiguously: <code>(id, name, state, price, qty, …)</code>, then the next tuple. This is optimal when your unit of work is the tuple — insert an order, read a customer record, update a balance. One seek, one page, done. But an analytical query like <code>SELECT AVG(price) FROM lineitem WHERE shipdate &gt; '2025-01-01'</code> touches 2 of, say, 16 attributes. In a row store with 200-byte tuples, you drag all 200 bytes through the memory hierarchy to use 12 of them — a 94% waste of every cache line and every byte of disk bandwidth. A column store flips the layout: all values of <code>price</code> contiguous, all values of <code>shipdate</code> contiguous. The scan now reads <em>only</em> the columns the query names. For a 16-column table and a 2-column query, that’s an immediate 8× I/O reduction before we’ve even mentioned compression.</p>
+
+  <figure>
+  <svg viewBox="0 0 800 360" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Row store versus column store layout and what a 2-column scan touches">
+    <rect x="0" y="0" width="800" height="360" fill="#efe8d8"/>
+    <text x="40" y="40" font-family="monospace" font-size="15" fill="#1d1a15">ROW STORE (NSM)</text>
+    <!-- row store: 3 tuples, each 5 cells -->
+    <g stroke="#1d1a15" stroke-width="1.5" fill="none">
+      <rect x="40" y="60" width="300" height="34"/>
+      <rect x="40" y="100" width="300" height="34"/>
+      <rect x="40" y="140" width="300" height="34"/>
+      <line x1="100" y1="60" x2="100" y2="174"/>
+      <line x1="160" y1="60" x2="160" y2="174"/>
+      <line x1="220" y1="60" x2="220" y2="174"/>
+      <line x1="280" y1="60" x2="280" y2="174"/>
+    </g>
+    <!-- shade needed cells in row store: price (col4) and date (col5) -->
+    <g fill="#93321b" opacity="0.30">
+      <rect x="220" y="60" width="120" height="34"/>
+      <rect x="220" y="100" width="120" height="34"/>
+      <rect x="220" y="140" width="120" height="34"/>
+    </g>
+    <text x="58" y="82" font-family="monospace" font-size="12" fill="#1d1a15">id</text>
+    <text x="110" y="82" font-family="monospace" font-size="12" fill="#1d1a15">name</text>
+    <text x="170" y="82" font-family="monospace" font-size="12" fill="#1d1a15">qty</text>
+    <text x="228" y="82" font-family="monospace" font-size="12" fill="#93321b">price</text>
+    <text x="288" y="82" font-family="monospace" font-size="12" fill="#93321b">date</text>
+    <text x="40" y="205" font-family="monospace" font-size="12" fill="#1d1a15">scan reads EVERY cell;</text>
+    <text x="40" y="225" font-family="monospace" font-size="12" fill="#1d1a15">cache line = 5 columns,</text>
+    <text x="40" y="245" font-family="monospace" font-size="12" fill="#1d1a15">2 useful → 40% utility</text>
+
+    <!-- divider -->
+    <line x1="400" y1="30" x2="400" y2="330" stroke="#93321b" stroke-width="1.5" stroke-dasharray="6 6"/>
+
+    <text x="440" y="40" font-family="monospace" font-size="15" fill="#1d1a15">COLUMN STORE (DSM)</text>
+    <!-- column store: 5 column strips -->
+    <g stroke="#1d1a15" stroke-width="1.5" fill="none">
+      <rect x="440" y="60" width="60" height="180"/>
+      <rect x="510" y="60" width="60" height="180"/>
+      <rect x="580" y="60" width="60" height="180"/>
+      <rect x="650" y="60" width="60" height="180"/>
+      <rect x="720" y="60" width="60" height="180"/>
+      <line x1="440" y1="120" x2="500" y2="120"/>
+      <line x1="440" y1="180" x2="500" y2="180"/>
+      <line x1="510" y1="120" x2="570" y2="120"/>
+      <line x1="510" y1="180" x2="570" y2="180"/>
+      <line x1="580" y1="120" x2="640" y2="120"/>
+      <line x1="580" y1="180" x2="640" y2="180"/>
+      <line x1="650" y1="120" x2="710" y2="120"/>
+      <line x1="650" y1="180" x2="710" y2="180"/>
+      <line x1="720" y1="120" x2="780" y2="120"/>
+      <line x1="720" y1="180" x2="780" y2="180"/>
+    </g>
+    <!-- shade only the two needed column strips -->
+    <g fill="#93321b" opacity="0.30">
+      <rect x="650" y="60" width="60" height="180"/>
+      <rect x="720" y="60" width="60" height="180"/>
+    </g>
+    <text x="452" y="262" font-family="monospace" font-size="12" fill="#1d1a15">id</text>
+    <text x="516" y="262" font-family="monospace" font-size="12" fill="#1d1a15">name</text>
+    <text x="592" y="262" font-family="monospace" font-size="12" fill="#1d1a15">qty</text>
+    <text x="654" y="262" font-family="monospace" font-size="12" fill="#93321b">price</text>
+    <text x="726" y="262" font-family="monospace" font-size="12" fill="#93321b">date</text>
+    <text x="440" y="300" font-family="monospace" font-size="12" fill="#1d1a15">scan reads 2 of 5 strips;</text>
+    <text x="440" y="320" font-family="monospace" font-size="12" fill="#1d1a15">cache line = 100% one column → SIMD-ready</text>
+  </svg>
+  <figcaption>Fig. 3.1 — The same table, two physical layouts. The shaded cells are what a SELECT AVG(price) … WHERE date &gt; … scan must pull through the memory hierarchy. NSM (n-ary storage model) drags every attribute along; DSM (decomposition storage model) reads only the two named columns, and each 64-byte cache line it fetches is 100% useful, type-homogeneous, and SIMD-friendly.</figcaption>
+  </figure>
+
+  <h3>Compression: where columns earn their second order of magnitude</h3>
+  <p>The I/O reduction above is the boring half. The exciting half: a column is a run of <em>same-typed, often-sorted, low-entropy</em> values, which compresses dramatically better than interleaved rows. Three encodings carry most of the weight. Work the numbers with me on a 1-billion-row <code>lineitem</code> table.</p>
+  <p><strong>Run-length encoding (RLE).</strong> Take <code>shipdate</code>, and suppose the table is sorted on it. A billion rows spanning ~2,500 distinct days means each date repeats ~400,000 times consecutively. Store <code>(value, run_length)</code> pairs: 2,500 pairs × 8 bytes ≈ 20&nbsp;KB, versus 4&nbsp;GB raw (4-byte dates × 10⁹). That’s a <strong>200,000×</strong> ratio — absurd, and real, but <em>only</em> on the sort column. RLE on an unsorted column degenerates to runs of length 1 and a 2× <em>expansion</em>. Lesson: compression choice is a function of sort order, which is why C-Store makes sort order a first-class physical-design decision.</p>
+  <p><strong>Dictionary encoding.</strong> Take <code>ship_state</code>: 50 distinct values, stored as variable-length strings averaging 9 bytes. Build a dictionary mapping each string to an integer code; ⌈log₂ 50⌉ = 6 bits per value. Raw: 9&nbsp;GB. Encoded: 10⁹ × 6 bits = 750&nbsp;MB, plus a 450-byte dictionary. Ratio: <strong>12×</strong>. Better still, predicates rewrite into code space — <code>state = 'CA'</code> becomes <code>code = 4</code>, an integer comparison against packed data, no string handling in the inner loop.</p>
+  <p><strong>Bit-packing.</strong> Take <code>quantity</code>, stored as a 4-byte int but actually ranging 1–50. You need ⌈log₂ 50⌉ = 6 bits, not 32. Packed: 750&nbsp;MB vs 4&nbsp;GB — <strong>5.3×</strong>, from nothing but refusing to store leading zeros. Combine with frame-of-reference (store deltas from a per-block minimum) and ascending keys like order IDs pack into a few bits each. These three encodings stack: dictionary first, then bit-pack the codes, then RLE the packed runs. Real Parquet files on real warehouse data routinely land at 5–10× overall — which means a 10&nbsp;TB logical scan is a 1–2&nbsp;TB physical one.</p>
+
+  <h3>Late materialization and projections</h3>
+  <p>If you decompress and glue columns back into tuples at the bottom of the plan, you’ve rebuilt a row store with extra steps. C-Store’s answer is <strong>late materialization</strong>: operate on columns (ideally still compressed) as long as possible, carrying only <em>position lists</em> between operators. Evaluate <code>shipdate &gt; X</code> directly on RLE runs — a predicate on a run of 400,000 identical values is <em>one</em> comparison, not 400,000 — producing a bitmap of qualifying positions. AND that bitmap with the result of <code>state = 4</code>. Only then fetch <code>price</code> values at the surviving positions and aggregate. Tuples get stitched together only at the top, for the handful of rows that survive, instead of at the bottom for all billion.</p>
+  <p>C-Store’s other heresy: it doesn’t store “the table” at all. It stores <strong>projections</strong> — overlapping subsets of columns, each sorted on a different key, each compressed per its own sort order. A query picks whichever projection covers its columns with the friendliest sort order. Redundant storage buying read speed — this is the RUM triangle from Week 2 wearing different clothes. The write problem (sorted, compressed, replicated data is miserable to update) is handled by a small row-oriented Writeable Store in front, merged into the Read-optimized Store in batches. Squint and you’ll see the LSM shape again: optimize reads in the big immutable structure, absorb writes in a small mutable one, pay with background merges.</p>
+
+  <h3>Why the hardware votes for columns</h3>
+  <p>Two mechanical facts seal the argument. <strong>Cache lines:</strong> memory arrives in 64-byte lines. Scanning a column of 4-byte ints, every line delivers 16 useful values; scanning the same predicate over 200-byte rows, every line delivers at most a fraction of one. On a machine with ~25&nbsp;GB/s per-core effective bandwidth, that utilization difference <em>is</em> the speedup, because scans are bandwidth-bound. <strong>SIMD:</strong> AVX-512 compares 16 packed 32-bit values per instruction — but only if the values are contiguous and same-typed. Columnar layout is precisely the precondition for SIMD; row layout makes it impossible without a gather, which forfeits the win. The column store isn’t clever; it’s shaped like the machine.</p>
+
+  <div class="aside"><div class="k">Field note · 2009, a telecom warehouse</div>A team I knew ran the same 40-line revenue query on their row-store warehouse (11 minutes) and on an early Vertica cluster — C-Store’s commercial child — on cheaper hardware (4.2 seconds). The DBA’s first reaction was to assume the result was cached and restart the cluster. It wasn’t the cache. It was 14 columns they were no longer reading, a sort order that turned the date predicate into RLE-run arithmetic, and a plan that never materialized a tuple until the final 900 rows. The vendor didn’t win the deal on price. They won it because the demo looked like a magic trick.</div>
+
+  <div class="pull">A 50× gap isn’t an optimization opportunity — it’s the <b>sound of the wrong architecture</b> hitting the right workload.</div>
+</section>
+
+<section class="block">
+  <div class="sec-label">Lecture 2 · Thursday</div>
+  <h2>Vectorized Execution: From Tuple-at-a-Time to Batches</h2>
+
+  <p class="opener">Tuesday was about <em>layout</em>; today is about <em>execution</em>, and the villain is one of the most beloved designs in database history. The Volcano iterator model (Graefe, 1990) gives every operator the same interface — <code>open()</code>, <code>next()</code>, <code>close()</code> — and composes plans like Unix pipes: each <code>next()</code> call pulls one tuple from the operator below. It is beautiful, modular, and memory-frugal: only one tuple is in flight at a time, which mattered enormously when RAM was measured in megabytes. It is also, on modern CPUs, catastrophically slow for analytics — and the MonetDB/X100 paper (CIDR 2005) measured exactly how slow: commercial DBMSs executing TPC-H Query 1 achieved instructions-per-cycle efficiency an order of magnitude below hand-written C, spending under 10% of their cycles on actual query work.</p>
+
+  <h3>The price of one tuple at a time</h3>
+  <p>Count the overhead per tuple in a Volcano plan. Each <code>next()</code> is a virtual function call — an indirect branch the CPU can’t reliably predict, ~20–40 cycles with the pipeline flush. A three-operator plan (scan → filter → aggregate) costs three of those per tuple, plus attribute extraction from the tuple slot, plus type-dispatch (“is this an int4 or a numeric?”) decided <em>per value</em> inside the expression interpreter. Total: hundreds of cycles of interpretation wrapping ~5 cycles of actual work — a compare, an add. At 10⁹ tuples, a query whose useful work is ~5 billion cycles spends 100+ billion on ceremony. The function-call tax doesn’t show up in OLTP, where a query touches 10 rows; it devours OLAP, where a query touches 10⁹. Same model, different workload, opposite verdict — Stonebraker’s thesis again, now at the level of the inner loop.</p>
+
+  <h3>X100: vectors of ~1000, primitives, cache residency</h3>
+  <p>MonetDB/X100’s fix keeps Volcano’s composable pull-based plan but changes the unit of exchange: <code>next()</code> returns a <strong>vector of ~1000 values per column</strong>, not one tuple. The virtual call, the branch misprediction, the operator-dispatch logic — all still there, but amortized over 1000 values: 30 cycles ÷ 1000 = 0.03 cycles per value of overhead instead of 30. Inside operators, work is done by <strong>primitives</strong>: pre-compiled, type-specialized tight loops like <code>select_lt_int32</code> or <code>map_mul_double</code>. No interpretation inside the loop — the type dispatch happened once per vector, not once per value — so the compiler unrolls, the hardware prefetcher streams, and SIMD applies. X100 reported TPC-H Q1 going from ~minutes-per-gigabyte interpretation regimes to being limited by memory bandwidth, two orders of magnitude better IPC than the tuple-at-a-time commercial engines it benchmarked.</p>
+  <p>Why 1000 and not 1,000,000? Because the other failure mode is full-column-at-a-time execution (original MonetDB BAT algebra): materializing every intermediate result as a complete column array spills intermediates to RAM — or disk — between every operator. The vector size is chosen so that <em>all the vectors live in a plan’s working set fit in L1/L2 cache</em>. A 1000-value vector of 4-byte ints is 4&nbsp;KB; a dozen of them in flight is ~50&nbsp;KB — comfortably inside a 1&nbsp;MB L2. Each vector is produced, consumed by the next primitive, and overwritten while still cache-hot. The X100 paper’s own sensitivity graph is U-shaped: performance climbs steeply from vector size 1 (interpretation-dominated), plateaus around 10²–10³, then degrades past ~10⁴ as vectors fall out of cache. The sweet spot is “big enough to amortize interpretation, small enough to stay resident.” Memorize that sentence; it generalizes to half of systems design.</p>
+
+  <pre><code>/* An X100-style primitive: selection on one column vector.
+ * One virtual call delivered 'n' ≈ 1024 values; everything
+ * below is a branch-free, type-specialized, cache-resident loop
+ * the compiler auto-vectorizes (AVX2: 8 lanes per instruction).
+ */
+size_t sel_lt_int32(const int32_t *col, int32_t bound,
+                    uint32_t *sel_out, size_t n)
+{
+    size_t k = 0;
+    for (size_t i = 0; i &lt; n; i++) {
+        sel_out[k] = (uint32_t)i;     /* write position…        */
+        k += (col[i] &lt; bound);        /* …keep it only on match */
+    }
+    return k;   /* selection vector: positions, not copies —
+                   late materialization at execution scale */
+}</code></pre>
+
+  <p>Note what the primitive returns: a <em>selection vector</em> of qualifying positions, not a copied-out vector of survivors. Downstream primitives take <code>(data, sel, n)</code> and iterate only the selected positions. This is Tuesday’s late materialization recurring at micro-scale — pass positions, defer copying — and the branch-free <code>k += (cond)</code> idiom sidesteps the branch predictor entirely, which matters because a 50%-selective predicate is the predictor’s worst nightmare.</p>
+
+  <h3>Vectorize or compile? The HyPer counterpoint</h3>
+  <p>Vectorization is not the only escape from Volcano. The other is <strong>JIT compilation</strong>: HyPer (Neumann, 2011) compiles each query into LLVM machine code that fuses a whole pipeline — scan, filter, aggregate — into one loop, keeping the current tuple <em>in registers</em> with zero materialization between operators. Both approaches kill interpretation overhead; they differ in what they pay. The 2018 “Everything You Always Wanted to Know…” study (Kersten et al.) built both models in one codebase and found neither dominates: compilation wins on computation-heavy queries with long pipelines (no vector materialization at all), vectorization wins on memory-bound scans (SIMD-friendly, better cache behavior on hash joins) — usually within 2× of each other, both ~100× over Volcano.</p>
+
+  <table>
+    <thead>
+      <tr><th>Dimension</th><th>Volcano (tuple-at-a-time)</th><th>Vectorized (X100 → DuckDB)</th><th>JIT-compiled (HyPer → Umbra)</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Interpretation overhead per value</td><td>~100s of cycles (virtual calls, type dispatch)</td><td>~0.03–0.5 cycles (amortized over ~1K vector)</td><td>≈0 (fused native loop)</td></tr>
+      <tr><td>Intermediate results</td><td>One tuple in flight</td><td>Cache-resident vectors (~4 KB/col)</td><td>None — values held in registers</td></tr>
+      <tr><td>SIMD</td><td>Impossible</td><td>Natural (contiguous typed vectors)</td><td>Possible, harder to coax from codegen</td></tr>
+      <tr><td>Query startup latency</td><td>None</td><td>None — primitives precompiled</td><td>Compile time: ms–100s of ms per query</td></tr>
+      <tr><td>Profiling &amp; adaptivity</td><td>Easy, per-operator</td><td>Easy — per-primitive timing, swap kernels mid-query</td><td>Hard — one opaque fused loop</td></tr>
+      <tr><td>Engineering cost</td><td>Low</td><td>Medium (primitive library, ~exhaustive type combos)</td><td>High (codegen, debugging machine code)</td></tr>
+    </tbody>
+  </table>
+
+  <div class="aside"><div class="k">Aside · the HyPer compile-time tax</div>HyPer’s authors discovered that for short interactive queries, LLVM’s optimization passes could cost more than running the query — so HyPer shipped an adaptive scheme: start executing a quick-and-dirty compiled version (or interpret the bytecode) while optimized code compiles in the background, swapping it in mid-flight if the query lasts long enough. Its successor Umbra went further with a custom IR to make codegen itself near-instant. Keep this in your pocket for the agent discussion below: <em>when queries are numerous, short, and speculative, fixed per-query startup cost stops being a rounding error and starts being the bill.</em></div>
+
+  <h3>The agent angle: scan-dominant, speculative, and impatient</h3>
+  <p>Now run this week through the course thesis. A human analyst issues perhaps a dozen carefully-considered queries per hour. An agent doing exploratory analysis issues <em>hundreds</em>: profile every column, test five hypotheses, compute a correlation matrix, abandon four branches, drill into the fifth. Three properties of this workload follow. It is <strong>scan-dominant</strong> — profiling and hypothesis-testing queries are aggregations over wide ranges, the exact shape columns plus vectorization serve best, and the exact shape B-tree point indexes serve worst. It is <strong>speculative</strong> — most queries are dead ends, so the economics demand cheap queries over fast-but-expensive ones; you can’t justify building an index, or even a long JIT compile, for a query that will run once and be discarded. And it is <strong>impatient in aggregate</strong> — per-query overhead (connection setup, planning, compilation) multiplies by the query count, which is why vectorized engines with precompiled primitives and near-zero startup (DuckDB embedded in the agent’s process is the limit case) fit agents better than engines that amortize heavy per-query investment over long-running reports.</p>
+  <p>This is also why the open descendants of this week’s papers matter more than the papers’ own systems. <strong>Parquet</strong> is C-Store’s storage chapter standardized: columnar layout, dictionary + RLE + bit-packing per column chunk, min/max zone maps per row group for predicate skipping — readable by every engine, sitting in object storage. <strong>Arrow</strong> is the X100 vector standardized: a common in-memory columnar format so that the engine, the dataframe library, and the agent’s tool-call boundary pass vectors by pointer instead of serializing tuples. An agent that calls DuckDB over Arrow against Parquet in S3 is running the 2005 research stack, verbatim, as commodity open infrastructure. One size fit none; so the sizes became formats, and the formats won.</p>
+</section>
+
+<section class="block">
+  <div class="sec-label">Readings</div>
+  <h2>Read Before Thursday</h2>
+  <div class="reads-block">
+    <div class="read-row"><div class="n">1</div><div class="t"><i>“One Size Fits All”: An Idea Whose Time Has Come and Gone</i> — Stonebraker &amp; Çetintemel, ICDE 2005.<span class="v">Read for the method, not the predictions: how to argue from workload characteristics to architecture. Note which of its bets aged well (warehousing, streams) and which didn’t.</span></div></div>
+    <div class="read-row"><div class="n">2</div><div class="t"><i>C-Store: A Column-oriented DBMS</i> — Stonebraker et al., VLDB 2005.<span class="v">Focus on §3–4: projections, sort-order-dependent compression, and the WS/RS split. Ask yourself at every design choice: which corner of the RUM triangle is being traded away?</span></div></div>
+    <div class="read-row"><div class="n">3</div><div class="t"><i>MonetDB/X100: Hyper-Pipelining Query Execution</i> — Boncz, Zukowski &amp; Nes, CIDR 2005.<span class="v">Focus on §2 (why TPC-H Q1 gets &lt;10% of hand-coded performance in tuple-at-a-time engines) and the vector-size experiment — the U-shaped curve is the whole lecture in one figure.</span></div></div>
+  </div>
+</section>
+
+<section class="block">
+  <div class="sec-label">Exercises</div>
+  <h2>This Week’s Problems</h2>
+  <div class="exercise">
+    <div class="ex-head">Exercise 3.1 · warm-up</div>
+    <div class="ex-body"><p>A 2-billion-row events table has a <code>country</code> column (200 distinct values, stored as strings averaging 11 bytes) and a <code>ts</code> timestamp column (8 bytes, table sorted on it, ~50,000 rows share each distinct second). Compute the compressed size and compression ratio of: (a) <code>country</code> under dictionary encoding with bit-packed codes; (b) <code>ts</code> under RLE with 16-byte <code>(value, run)</code> pairs; (c) <code>country</code> under RLE — and explain in one sentence why (c) comes out the way it does.</p></div>
+  </div>
+  <div class="exercise">
+    <div class="ex-head">Exercise 3.2 · core</div>
+    <div class="ex-body"><p>Model a three-operator plan (scan → filter → sum) over 10⁹ tuples. Assume each <code>next()</code> call costs 30 cycles of call-and-dispatch overhead, per-value useful work is 4 cycles, and your CPU runs 3×10⁹ cycles/s. (a) Estimate runtime under tuple-at-a-time execution. (b) Re-estimate with 1024-value vectors, where each operator additionally pays a fixed 200 cycles per vector for primitive setup. (c) Find the vector size at which total overhead (call amortization + setup) drops below 5% of useful work. (d) Now add a memory constraint — each in-flight vector column is 4 bytes/value and the plan keeps 10 vectors live in a 512 KB L2 — and state the largest admissible vector size. Compare (c) and (d) and write two sentences on what bounds the sweet spot from each side.</p></div>
+  </div>
+  <div class="exercise">
+    <div class="ex-head">Exercise 3.3 · stretch</div>
+    <div class="ex-body"><p>Design — on paper, with concrete mechanisms — an execution engine for a <em>speculative agent</em> workload: bursts of 200–500 short analytical queries arriving over ~60 seconds, where ~80% of results are discarded by the agent and many queries are near-duplicates differing only in one predicate constant or one grouping column. Address: (a) vectorized vs. JIT vs. hybrid, with a defensible startup-cost budget per query; (b) what you cache and reuse across near-duplicate queries (plans? compiled primitives? subexpression results? zone-map verdicts?) and how you detect reuse safely; (c) whether you would speculatively execute queries the agent hasn’t issued yet, and what admission control prevents speculation from starving real work; (d) the metric you would optimize — it is not single-query latency — and how you would benchmark it. There is no canonical answer; published systems disagree with each other here. Be quantitative where you can and honest where you can’t.</p></div>
+  </div>
+  <div class="fleuron">❦</div>
+</section>
+
+<nav class="pager">
+  <a href="week-02.html"><span class="dir">← Week 02</span><span class="ttl">B-Trees, LSM-Trees &amp; the RUM Triangle</span></a>
+  <a class="next" href="week-04.html"><span class="dir">Week 04 →</span><span class="ttl">Disaggregation &amp; Elasticity</span></a>
+</nav>
+
+</main>
+
+<footer class="site">
+  <div class="inner">
+    <span>DATA 2027 — a course that doesn’t exist yet · <a href="../index.html">Essay № 01</a> · <a href="../course.html">Essay № 02</a></span>
+    <span>CC BY 4.0 · built with <a href="https://claude.com/claude-code">Claude Code</a></span>
+  </div>
+</footer>
+
+</body>
+</html>

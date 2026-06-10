@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Week 13: Self-Driving, Self-Assembling, Self-Designing — DATA 2027</title>
+<meta name="description" content="From auto-tuning to self-design: self-driving DBMSs, OtterTune’s rise and shutdown, the Data Calculator, and the LLM agent as DBA.">
+<meta name="theme-color" content="#f6f1e7">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23f6f1e7'/%3E%3Cellipse cx='50' cy='28' rx='30' ry='12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 28v44c0 6.6 13.4 12 30 12s30-5.4 30-12V28' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 50c0 6.6 13.4 12 30 12s30-5.4 30-12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500;9..144,600;9..144,900&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400;1,6..72,500&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="course.css">
+</head>
+<body>
+
+<div class="masthead">
+  <span><a href="index.html">DATA 2027</a> <span class="dot">●</span> DATA SYSTEMS IN THE AGENTIC ERA</span>
+  <span><a href="index.html">← SCHEDULE</a></span>
+</div>
+
+<header class="page-head">
+  <div class="kicker">Week 13 · Part IV — Frontier &amp; Futures</div>
+  <h1>Self-Driving, Self-Assembling, <em>Self-Designing</em></h1>
+  <p class="standfirst">For twenty years the field has promised databases that tune, index, and eventually design themselves — and the promise keeps half-arriving. This week we trace the line from OtterTune’s Gaussian processes to the Data Calculator’s design continuum to the thing that actually shipped: a general-purpose agent with a master prompt and a connection string.</p>
+  <div class="meta"><b>Lectures:</b> Tue — From auto-tuning to self-design · Thu — The agent as DBA &nbsp;·&nbsp; <b>Lab:</b> Fri — Branch-based tuning experiments with an LLM agent on a replayed workload</div>
+</header>
+
+<main>
+
+<section class="block">
+  <div class="objectives">
+    <div class="k">Learning objectives — after this week you can…</div>
+    <ul>
+      <li>Draw the self-driving DBMS control loop (forecast → plan → act → observe) and explain why workload forecasting, not ML cleverness, is the load-bearing component.</li>
+      <li>Explain how OtterTune framed knob tuning as black-box optimization with Gaussian-process regression, and give two structural reasons the standalone product died in 2024 while the technique survived inside platforms.</li>
+      <li>Navigate the Data Calculator’s design space: given a read/write/memory budget, predict which layout primitives a cost synthesizer would choose, and extend the same framing to RAG and serving pipelines.</li>
+      <li>Contrast a narrow learned tuner with a general LLM agent acting as DBA, and specify the guardrail / eval / rollback harness the agent needs before it touches production.</li>
+      <li>Audit any “learned database component” claim circa 2026 and classify it honestly: in-production, advisor-mode, or lab-only.</li>
+    </ul>
+  </div>
+</section>
+
+<section class="block">
+  <div class="sec-label">Lecture 1 · Tuesday</div>
+  <h2>From Auto-Tuning to Self-Design</h2>
+
+  <p class="opener">Andy Pavlo opened CIDR 2017 with a deliberately immodest claim: everything before — index advisors, knob wizards, partition recommenders — was “automated” but not <strong>autonomous</strong>, because a human still decided when to apply the advice and absorbed the blame when it went wrong. A self-driving DBMS, by analogy to a self-driving car, must close the loop itself: predict where the workload is going, choose actions whose costs pay off before the prediction expires, apply them without a maintenance window, and learn from the outcome. The paper’s architecture (built into the Peloton prototype, later reborn as NoisePage) has three stages, and the ordering is the whole argument: <em>forecast first, then plan</em>. You cannot decide whether building an index is worth its 40-minute build cost unless you can predict that the queries it serves will still be arriving 40 minutes from now. Autonomy is a bet on the future of the workload, and the quality of the bet is bounded by the quality of the forecast.</p>
+
+  <h3>Workload forecasting: the unglamorous keystone</h3>
+  <p>The CMU follow-up work (QueryBot 5000, SIGMOD 2018) made the forecasting problem concrete. Raw query logs are too high-cardinality to forecast — a busy OLTP system sees millions of distinct statements per day — so the first move is to <strong>template</strong> queries (strip constants) and then <strong>cluster</strong> templates by arrival-rate correlation. The striking empirical fact: across the workloads they studied (a bus-tracking app, an academic site, MOOC infrastructure), the top 5 clusters covered roughly 95% of query volume. Forecast those few time series — with an ensemble of linear regression for short horizons and a recurrent network for longer ones — and you can predict arrival rates an hour to a week out, accurately enough to schedule index builds at the 3 a.m. trough the model saw coming. Note what this implies for our course thesis: agentic clients make this <em>harder</em>. Agent-generated SQL templates poorly (every prompt produces a slightly different join order), and agent traffic has bursts correlated with upstream model behavior, not human circadian rhythm. Forecasting research assumed the diurnal human; week 13’s client doesn’t sleep.</p>
+
+  <h3>Action planning: a control problem wearing an ML costume</h3>
+  <p>Given a forecast, the planner searches a space of actions — add/drop index, repartition, resize buffer pool, change knob — each with an estimated benefit, an estimated cost to apply, and a confidence. Pavlo’s framing is receding-horizon control: pick the action sequence that maximizes predicted objective (latency, cost, SLO compliance) over the forecast window, re-plan as observations arrive. Two disciplined constraints fall out. First, <strong>every action needs an undo</strong>; an autonomous system that cannot cheaply reverse a bad index is an autonomous system that will eventually destroy a weekend. Second, the system must <strong>never explore on the critical path</strong> — exploration (trying a knob to see what happens) is the expensive part of learning, and doing it on production traffic is how trust dies. Hold these two constraints in mind; they return on Thursday unchanged, with an LLM in the planner’s seat.</p>
+
+  <figure>
+    <svg viewBox="0 0 800 360" role="img" aria-label="Self-driving DBMS control loop">
+      <rect x="0" y="0" width="800" height="360" fill="#efe8d8"/>
+      <!-- loop boxes -->
+      <rect x="60" y="60" width="180" height="74" fill="none" stroke="#1d1a15" stroke-width="2" rx="3"/>
+      <text x="150" y="92" text-anchor="middle" font-family="monospace" font-size="15" fill="#1d1a15">FORECAST</text>
+      <text x="150" y="114" text-anchor="middle" font-family="monospace" font-size="11" fill="#1d1a15">cluster + predict arrivals</text>
+      <rect x="320" y="60" width="180" height="74" fill="none" stroke="#1d1a15" stroke-width="2" rx="3"/>
+      <text x="410" y="92" text-anchor="middle" font-family="monospace" font-size="15" fill="#1d1a15">PLAN</text>
+      <text x="410" y="114" text-anchor="middle" font-family="monospace" font-size="11" fill="#1d1a15">benefit − apply cost</text>
+      <rect x="580" y="60" width="160" height="74" fill="none" stroke="#1d1a15" stroke-width="2" rx="3"/>
+      <text x="660" y="92" text-anchor="middle" font-family="monospace" font-size="15" fill="#1d1a15">ACT</text>
+      <text x="660" y="114" text-anchor="middle" font-family="monospace" font-size="11" fill="#1d1a15">index / knob / partition</text>
+      <rect x="320" y="230" width="180" height="74" fill="none" stroke="#93321b" stroke-width="2.5" rx="3"/>
+      <text x="410" y="262" text-anchor="middle" font-family="monospace" font-size="15" fill="#93321b">OBSERVE</text>
+      <text x="410" y="284" text-anchor="middle" font-family="monospace" font-size="11" fill="#93321b">did p99 actually move?</text>
+      <!-- arrows -->
+      <path d="M240 97 L312 97" stroke="#93321b" stroke-width="2" fill="none"/>
+      <path d="M312 97 l-12 -6 v12 z" fill="#93321b"/>
+      <path d="M500 97 L572 97" stroke="#93321b" stroke-width="2" fill="none"/>
+      <path d="M572 97 l-12 -6 v12 z" fill="#93321b"/>
+      <path d="M660 134 C660 230 520 267 508 267" stroke="#93321b" stroke-width="2" fill="none"/>
+      <path d="M508 267 l13 -6 v12 z" fill="#93321b"/>
+      <path d="M320 267 C160 267 150 200 150 142" stroke="#93321b" stroke-width="2" fill="none"/>
+      <path d="M150 142 l-6 13 h12 z" fill="#93321b"/>
+      <!-- guardrails -->
+      <line x1="60" y1="330" x2="740" y2="330" stroke="#1d1a15" stroke-width="2" stroke-dasharray="7 5"/>
+      <text x="400" y="350" text-anchor="middle" font-family="monospace" font-size="12" fill="#1d1a15">guardrails: every action reversible · never explore on the critical path</text>
+      <text x="400" y="34" text-anchor="middle" font-family="monospace" font-size="13" fill="#93321b">the loop is the product — each box has been swapped out since 2017</text>
+    </svg>
+    <figcaption>Fig. 13.1 — The self-driving control loop from Pavlo et al. (CIDR 2017). OtterTune replaced PLAN with a Gaussian process; the Data Calculator widened ACT from “tune the structure” to “choose the structure”; the 2026 LLM-DBA replaces the planner with a general agent. The dashed guardrail line is the only part that has never changed.</figcaption>
+  </figure>
+
+  <h3>OtterTune: knob tuning as black-box optimization</h3>
+  <p>PostgreSQL exposes roughly 350 configuration knobs; MySQL, over 500. They interact nonlinearly (<code>shared_buffers</code> and <code>effective_cache_size</code> fight over the same RAM; WAL knobs trade throughput against recovery time), and the defaults are tuned for a machine from 2008. OtterTune (VLDB 2017, out of the same CMU group) treated the configuration vector as input to a black box: run the workload, observe a target metric, fit a <strong>Gaussian-process regression</strong> over configurations, and pick the next configuration by maximizing expected improvement — classic Bayesian optimization, plus two pragmatic tricks. It used factor analysis and k-means to prune hundreds of runtime metrics down to a non-redundant handful, and <strong>LASSO</strong> to rank knobs by impact, tuning only the top of the list. The empirical punchline students should retain: a small set — order of 10 knobs — captures the large majority of achievable gain, and the tuned configurations beat defaults by wide margins (in the paper’s TPC-C runs, roughly 25–60% better latency or throughput than vendor defaults, competitive with human DBA configs). The deeper lesson is the framing: tuning needed no model <em>of the database</em>. The database is a function; sample it.</p>
+
+  <h3>The postmortem: why the company died and the capability didn’t</h3>
+  <p>OtterTune the startup (founded 2020, ~$14.5M raised) shut down in 2024 — Pavlo announced it with characteristic bluntness after an acquisition fell through. The failure was structural, not scientific, and it generalizes, so treat it as a case study. <strong>One:</strong> tuning is episodic. A customer pays, gets a 30% improvement in week one, and then the optimizer has converged — what exactly is the recurring subscription buying in month nine? <strong>Two:</strong> the distribution channel belonged to someone else. Knob access requires deep cloud-provider cooperation, and the providers — Amazon, Microsoft, Google — concluded, correctly, that auto-tuning is a platform feature, not a product. Azure SQL has shipped automatic index creation/drop since 2019; Aurora and the autonomous-branded offerings absorbed the rest. By 2024 the capability hadn’t failed; it had <em>dissolved into the substrate</em>. This is a recurring pattern in our field — remember it when you evaluate any startup whose pitch is “we tune your X”: if X’s vendor can absorb the feature, it will.</p>
+
+  <div class="aside"><span class="k">Field note · the advisor-mode plateau</span>None of this began in 2017. Microsoft’s AutoAdmin project shipped an index-tuning wizard in SQL Server 7.0 in <em>1998</em>; IBM’s DB2 had SMART; Oracle shipped the SQL Tuning Advisor in 2004. Every one of them plateaued at the same altitude: the system recommends, a human approves. Two decades of research couldn’t cross the approval gap, because the gap was never technical — it was about who gets paged at 3 a.m. when the recommendation is wrong. Keep that in mind Thursday, when we ask whether an LLM crosses it.</div>
+
+  <h3>The Data Calculator: stop tuning structures, start deriving them</h3>
+  <p>Stratos Idreos’s Data Calculator (SIGMOD 2018) raises the ambition a full level. Tuning accepts the B-tree and adjusts its knobs; self-design asks why you assumed a B-tree at all. The insight: data structures are not a zoo of inventions but points in a <strong>combinatorial design space</strong> assembled from a few dozen layout primitives — is a node sorted or unsorted? fixed or variable fanout? does it carry filters, fence pointers, a buffer? The Harvard group counts more than 10<sup>32</sup> valid two-node-type designs from ~50 primitives; B-trees, LSM-trees, tries, and hash tables are merely the famous coordinates. The second half is <strong>cost synthesis</strong>: instead of implementing a candidate to benchmark it, the Calculator composes per-primitive cost models — themselves <em>learned</em> from micro-benchmarks on the target hardware, so cache effects come from measurement rather than from a heroic analytical model — into an end-to-end cost for a given workload and machine. What-if questions (“what is this design’s point-read cost on this box at this read/write mix?”) answer in seconds instead of person-months. Design becomes navigation: specify the workload, search the continuum, and the structure falls out. The RUM tradeoff (read vs. update vs. memory — you may optimize two) is the terrain’s conservation law; the Calculator is its map.</p>
+
+  <p>And the framing refuses to stay inside storage engines. A RAG pipeline is also a point in a design space: chunk size, embedding model, index family (HNSW’s <code>M</code> and <code>efSearch</code> vs. IVF’s <code>nlist</code>/<code>nprobe</code>), reranker depth, cache policy. Today teams pick these by folklore and vibes — exactly how people picked B-tree fill factors in 1985. A “Data Calculator for serving pipelines” — primitives, composable learned cost models, synthesis under a recall/latency/cost objective — is an obvious open problem, and it is this week’s stretch exercise.</p>
+
+  <div class="pull">Autonomy never shipped as a product you buy. It shipped as a <b>layer you stop noticing</b>.</div>
+</section>
+
+<section class="block">
+  <div class="sec-label">Lecture 2 · Thursday</div>
+  <h2>The Agent as DBA</h2>
+
+  <p class="opener">Here is the twist the 2017 roadmap did not predict: the first broadly deployed “autonomous DBA” is not a learned component inside the engine. It is a general-purpose LLM agent sitting <em>outside</em> the engine, holding a connection string, an MCP server, and a packaged master prompt. Every serious Postgres platform now ships an MCP server exposing schema inspection, <code>EXPLAIN</code>, statistics views, and migration execution as tools; alongside them ship what amount to master prompts — multi-thousand-token operational playbooks encoding schema-design review, index selection heuristics, zero-downtime migration choreography (create concurrently, backfill in batches, swap, drop). The expertise that OtterTune encoded in a Gaussian process and the 2004 advisors encoded in C++ is now encoded in prose, executed by a model that can also read the manual. This sounds like a regression in rigor. In three specific ways it is an advance — and in three others, nothing has changed at all.</p>
+
+  <h3>What changes: the tuner can read, experiment, and explain</h3>
+  <p>First, the agent <strong>reads documentation</strong>. OtterTune treated the DBMS as a black box because that was the only honest contract a narrow ML system could have. An LLM agent knows — from training and from fetching release notes — that <code>checkpoint_completion_target</code> spreads checkpoint I/O across the interval, that Postgres 17 changed vacuum memory accounting, that your ORM’s lazy loading explains the N+1 pattern in the log. It debugs causally where the GP could only regress. Second, the agent <strong>experiments on branches</strong>. Copy-on-write database branching (Neon, Aurora clones, and friends) gives a writable replica of production in seconds for cents — the missing substrate for the “never explore on the critical path” rule. The 2017 loop had to learn from cautious production nudges; the 2026 agent forks reality, replays a captured workload, and measures. Third, the agent <strong>explains itself</strong>. A GP emits a configuration vector; the agent emits a hypothesis, an experiment, a result, and a pull request a human can argue with. Recall the advisor-mode plateau: the approval gap was a trust gap, and legible reasoning is the first technology that actually narrows it.</p>
+
+  <pre><code>-- agent tuning run #47 · branch: tune/checkpoint-2026-06-09 (fork of prod@LSN 0/8A3F1C40)
+-- hypothesis: p99 spikes align with checkpoints (log: "checkpoint starting: wal" every ~140s)
+ALTER SYSTEM SET max_wal_size = '8GB';                 -- was 1GB
+ALTER SYSTEM SET checkpoint_completion_target = 0.9;   -- was 0.5
+-- replay: 30 min captured workload, 14,212 statements, agent-traffic mix 71%
+-- result: p99 412ms → 287ms · p50 38ms → 37ms · WAL volume +9% · recovery-time est. +6.2 min
+-- gate:   PROMOTE requires p99 −20%, WAL ≤ +15%, recovery ≤ +10 min   → PASS
+-- action: open PR with diff + this transcript; do NOT apply to prod directly</code></pre>
+
+  <h3>What doesn’t change: guardrails, evals, rollback</h3>
+  <p>Now the cold water. The agent inherits every failure mode we catalogued for analytics agents in weeks 10–12, plus root-shaped blast radius. It hallucinates knob semantics across versions (plausible-sounding settings that were renamed two releases ago). It over-indexes — every individual <code>CREATE INDEX</code> looks locally beneficial, and twelve of them quietly halve your write throughput; the planner discipline of charging actions their <em>maintenance</em> cost does not come for free with a master prompt. And it is exposed to last week’s lethal trifecta: a DBA agent has private data, ingests untrusted content (query comments, table contents, the docs it fetches), and can execute DDL — the highest-privilege instance of the pattern we’ve seen. So the harness is non-negotiable, and it is exactly the validation discipline from the analytics chapter: <strong>guardrails</strong> (allowlisted tools; DDL only on branches; production changes only via reviewed migration PRs; hard SLO tripwires that revert autonomously), <strong>evals</strong> (a regression suite of tuning scenarios with known-good outcomes — replayed incidents, seeded slow queries — run against every prompt or model change, because a master prompt edit is a deploy), and <strong>rollback</strong> (every change carries a down-migration; every promoted config carries the branch evidence that justified it). The loop diagram from Tuesday survives intact; only the PLAN box got smarter.</p>
+
+  <div class="aside"><span class="k">Field note · the 40-minute lock</span>A team we’ll keep anonymous let a tuning agent apply its own “safe” migration: <code>ALTER TABLE … ADD COLUMN … DEFAULT</code> — safe in Postgres 11+, which the agent correctly cited. The production instance was Postgres 10. Full table rewrite, 40 minutes of <code>ACCESS EXCLUSIVE</code> lock, on the orders table. The post-incident fix was not a better model; it was a version-pinned eval case and a rule that migrations execute only through the same CI gate humans use. The agent’s citation was <em>right in general and wrong here</em> — which is the entire epistemology of LLM operations in one incident.</div>
+
+  <h3>An honest ledger: learned components in production, 2026</h3>
+  <p>Close the week by auditing the field’s own marketing. The 2017–2020 literature promised learned everything: indexes (Kraska et al.’s “The Case for Learned Index Structures,” 2018), cardinality estimators, optimizers (Bao, Neo), schedulers. Where did each actually land? The honest 2026 scorecard:</p>
+
+  <table>
+    <thead>
+      <tr><th>Component</th><th>Status 2026</th><th>Evidence &amp; caveats</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Automatic indexing</td><td><strong>Production, fleet-scale</strong></td><td>Azure SQL DB has created/dropped indexes autonomously since 2019, with built-in verification &amp; auto-revert — the existence proof that closed-loop actions can work at scale.</td></tr>
+      <tr><td>Knob tuning</td><td><strong>Absorbed into platforms</strong></td><td>OtterTune dead (2024); the capability lives on as managed-service defaults, adaptive autovacuum, “autonomous” tiers. Nobody buys it; everybody has it.</td></tr>
+      <tr><td>Optimizer steering (Bao-style)</td><td><strong>Production, narrow</strong></td><td>Hint-steering learned models run inside Microsoft’s big-data stack; per-query plan choice, with the classical optimizer as floor. The “learning to steer, not to plan” compromise won.</td></tr>
+      <tr><td>Learned cardinality estimation</td><td><strong>Advisor-mode / lab</strong></td><td>Beats histograms on benchmarks; loses on cold-start, drift, and tail-risk accountability. No major engine trusts it on the critical path by default.</td></tr>
+      <tr><td>Learned index structures</td><td><strong>Niche</strong></td><td>Ideas absorbed into LSM components and specialized stores; the B-tree, with its 60-cycle worst case and zero training pipeline, remains undefeated as default.</td></tr>
+      <tr><td>LLM agent as DBA</td><td><strong>Early production, gated</strong></td><td>Real deployments behind branch-only DDL, eval suites, and human-merged PRs. The autonomy is real; so is the harness.</td></tr>
+    </tbody>
+  </table>
+
+  <p>Read the pattern in the table: learned components succeed in production precisely in proportion to how cheap their mistakes are to detect and undo. Auto-indexing shipped because an index is verifiable and reversible; learned cardinalities stall because a bad estimate hides inside a slow plan with no alarm attached. That is the same conservation law that governs the agent-DBA harness, and the same one from Tuesday’s dashed guardrail line. The physics here was never about ML capability. It was about the cost of being wrong — and on that axis, nothing about 2026 is new.</p>
+</section>
+
+<section class="block">
+  <div class="sec-label">Readings</div>
+  <h2>Read Before Thursday</h2>
+  <div class="reads-block">
+    <div class="read-row"><div class="n">1</div><div class="t"><i>Self-Driving Database Management Systems</i> — Pavlo et al., CIDR 2017.<span class="v">The manifesto. Focus on the forecast→plan→act architecture and the explicit analogy ladder from “advisor” to “autonomous” — then ask which rung an LLM agent occupies.</span></div></div>
+    <div class="read-row"><div class="n">2</div><div class="t"><i>The Data Calculator: Data Structure Design and Cost Synthesis from First Principles and Learned Cost Models</i> — Idreos et al., SIGMOD 2018.<span class="v">Read for the design-space framing, not the implementation: layout primitives, the 10^32 continuum, and how learned micro-benchmark models compose into whole-structure cost predictions.</span></div></div>
+    <div class="read-row"><div class="n">3</div><div class="t"><i>OtterTune postmortem</i> — A. Pavlo, blog post, 2024.<span class="v">A rare honest startup autopsy by its own founder. Focus on why the science worked and the business didn’t: episodic value, and platforms absorbing the feature.</span></div></div>
+  </div>
+</section>
+
+<section class="block">
+  <div class="sec-label">Exercises</div>
+  <h2>This Week’s Problems</h2>
+  <div class="exercise">
+    <div class="ex-head">Exercise 13.1 · warm-up</div>
+    <div class="ex-body"><p>You benchmark five Postgres knobs one-at-a-time against a default baseline of p99 = 500 ms: <code>shared_buffers</code> → 410 ms, <code>max_wal_size</code> → 380 ms, <code>work_mem</code> → 470 ms, <code>random_page_cost</code> → 455 ms, <code>effective_io_concurrency</code> → 495 ms. (a) Rank the knobs by marginal sensitivity, OtterTune-LASSO style. (b) Jointly tuning the top two yields 290 ms — better than either alone predicts multiplicatively. Name the phenomenon, give a mechanistic hypothesis for <em>these</em> two knobs, and explain why it forces sample-efficient methods like GP regression instead of one-knob-at-a-time sweeps over a 350-knob space.</p></div>
+  </div>
+  <div class="exercise">
+    <div class="ex-head">Exercise 13.2 · core</div>
+    <div class="ex-body"><p>Design the full experiment protocol an LLM-DBA agent must follow before any production change, in the spirit of run #47 from lecture. Specify: (a) how the workload is captured and replayed on a branch, including how you make replay representative of a 70%-agent-traffic mix with poor query templating; (b) the promotion gate as concrete, falsifiable thresholds over at least four metrics — including one <em>maintenance-cost</em> metric that punishes over-indexing and one recovery/availability metric; (c) the rollback contract for both config changes and DDL; (d) five eval scenarios (seeded incidents with known-good resolutions) you would run against every change to the master prompt, with one scenario specifically targeting version-dependent knowledge like the Postgres 10/11 <code>ADD COLUMN DEFAULT</code> trap. Justify each gate threshold in one sentence.</p></div>
+  </div>
+  <div class="exercise">
+    <div class="ex-head">Exercise 13.3 · stretch</div>
+    <div class="ex-body"><p>Sketch a <strong>Data Calculator for RAG pipelines</strong>. (a) Define a primitive set of 10–15 design dimensions (chunking strategy and size, embedding model and dimensionality, index family with its parameters — e.g., HNSW <code>M</code>/<code>efSearch</code> vs. IVF <code>nlist</code>/<code>nprobe</code> — hybrid lexical fusion, reranker depth, cache policy) and estimate the size of the resulting design space. (b) Propose composable cost models for recall@k, p99 latency, and $/1k queries, stating which sub-models must be <em>learned</em> from micro-benchmarks (à la the Calculator) and which can be analytical. (c) Identify this space’s analogue of the RUM conjecture — which three desiderata cannot be simultaneously optimized, and why? (d) Either prototype the synthesizer on a small corpus and report where the cost model’s ranking diverges from measured reality, or argue rigorously for why a specific dimension (we suggest chunking) resists compositional cost modeling in a way storage-layout primitives do not. This is an open research problem; a sufficiently good answer is a workshop paper.</p></div>
+  </div>
+  <div class="fleuron">❦</div>
+</section>
+
+<nav class="pager">
+  <a href="week-12.html"><span class="dir">← Week 12</span><span class="ttl">Protocols, Permissions &amp; the Lethal Trifecta</span></a>
+  <a class="next" href="week-14.html"><span class="dir">Week 14 →</span><span class="ttl">What Goes Around</span></a>
+</nav>
+
+</main>
+
+<footer class="site">
+  <div class="inner">
+    <span>DATA 2027 — a course that doesn’t exist yet · <a href="../index.html">Essay № 01</a> · <a href="../course.html">Essay № 02</a></span>
+    <span>CC BY 4.0 · built with <a href="https://claude.com/claude-code">Claude Code</a></span>
+  </div>
+</footer>
+
+</body>
+</html>

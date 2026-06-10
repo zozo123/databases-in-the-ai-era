@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Week 6: Vector Indexes Are Access Methods, Not Products — DATA 2027</title>
+<meta name="description" content="ANN search from first principles — IVF, product quantization, HNSW, DiskANN — and why recall became a first-class tunable resource in the agentic era.">
+<meta name="theme-color" content="#f6f1e7">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23f6f1e7'/%3E%3Cellipse cx='50' cy='28' rx='30' ry='12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 28v44c0 6.6 13.4 12 30 12s30-5.4 30-12V28' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 50c0 6.6 13.4 12 30 12s30-5.4 30-12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500;9..144,600;9..144,900&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400;1,6..72,500&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="course.css">
+</head>
+<body>
+
+<div class="masthead">
+  <span><a href="index.html">DATA 2027</a> <span class="dot">●</span> DATA SYSTEMS IN THE AGENTIC ERA</span>
+  <span><a href="index.html">← SCHEDULE</a></span>
+</div>
+
+<header class="page-head">
+  <div class="kicker">Week 06 · Part II — New Access Methods &amp; Engines</div>
+  <h1>Vector Indexes Are <em>Access</em> Methods, Not Products</h1>
+  <p class="standfirst">For three years the industry sold approximate nearest-neighbor search as a new category of database. It isn’t one — it’s an index, and this week we treat it with the same rigor we gave B-trees and LSM-trees.</p>
+  <div class="meta"><b>Lectures:</b> Tue — ANN search: IVF, PQ, HNSW · Thu — DiskANN and the recall axis &nbsp;·&nbsp; <b>Lab:</b> Fri — Build an IVF-PQ index from scratch on 1M GloVe vectors; plot your own recall-vs-latency curve</div>
+</header>
+
+<main>
+
+<section class="block">
+  <div class="objectives">
+    <div class="k">Learning objectives — after this week you can…</div>
+    <ul>
+      <li>Explain why exact kNN in high dimensions degenerates to a scan, using the concentration-of-distances argument with concrete numbers.</li>
+      <li>Work the product-quantization codebook math: derive the 32× compression of a 128-dim float vector into 16 bytes and state what it costs in distance distortion.</li>
+      <li>Trace a query through HNSW’s layered graph and predict the effect of turning the <code>efSearch</code> and <code>efConstruction</code> knobs.</li>
+      <li>Explain how DiskANN serves a billion vectors from one node by splitting the graph (SSD) from compressed vectors (RAM), and why beam width matters.</li>
+      <li>Argue, with the RUM conjecture extended by a recall axis, why every production vector system converged on LSM-like segment-and-merge designs.</li>
+    </ul>
+  </div>
+</section>
+
+<section class="block">
+  <div class="sec-label">Lecture 1 · Tuesday</div>
+  <h2>ANN Search: IVF, PQ, HNSW</h2>
+
+  <p class="opener">Every agent you have built this semester ends up issuing the same query: <em>given this embedding, find the k most similar vectors among N</em>. Agent memory is this query. RAG is this query. Tool retrieval, deduplication, semantic caching of LLM calls — all this query. It is now plausibly the single most-executed access pattern in new systems, which is remarkable for an operation that relational engines never had a native index for. Today we build up the three ideas — inverted files, product quantization, and navigable small-world graphs — that underlie essentially every ANN index in production, and we are honest about what each one trades away.</p>
+
+  <h3>Why exact kNN at scale is hopeless</h3>
+  <p>Start with the brute-force baseline. N = 100M vectors, d = 768 floats each: that is 307&nbsp;GB of raw data, and one exact query must compute 100M dot products — roughly 77&nbsp;GFLOPs, plus the memory traffic to stream 307&nbsp;GB through the CPU. At ~50&nbsp;GB/s of effective bandwidth that is six seconds per query, before you’ve served a second user. So we want an index. But every spatial index you know — kd-trees, R-trees, grid files — works by pruning regions of space, and pruning dies in high dimensions.</p>
+  <p>The killer is <strong>concentration of distances</strong>. As d grows, the distance from a query to its nearest neighbor and to its farthest point converge: the ratio d<sub>max</sub>/d<sub>min</sub> → 1. Intuition: in d dimensions, the volume of a hypersphere concentrates in a thin shell near its surface — for d = 768, more than 99% of a unit ball’s volume lies in the outer 1% of radius. Everything is “far,” and everything is far by roughly the same amount, so a branch-and-bound index can almost never prove that a partition contains no candidates. A kd-tree on 768-dim data visits nearly every leaf; you have rebuilt the scan with extra pointer chasing. Real embeddings have lower <em>intrinsic</em> dimension than their ambient dimension — which is the only reason ANN works at all — but no exact structure exploits this with guarantees. Hence the field’s great surrender, and its great unlock: stop demanding the true neighbor. Accept <strong>recall@k</strong> — the fraction of true top-k results returned — as a quality dial, and suddenly orders of magnitude appear.</p>
+
+  <h3>IVF: coarse quantization, the “shard by meaning” trick</h3>
+  <p>The inverted file (IVF) index is k-means wearing a database hat. Offline: cluster the N vectors into <code>nlist</code> centroids (typical: <code>nlist</code> ≈ √N, so ~10,000 lists for 100M vectors), and store each vector in a posting list under its nearest centroid — exactly an inverted index from text retrieval, except the “terms” are learned regions of space. At query time: compare the query against all 10,000 centroids (cheap — that’s 10,000 dot products, not 100M), pick the closest <code>nprobe</code> lists, and scan only those. With <code>nprobe</code> = 10 of 10,000 lists you scan ~0.1% of the data — a 1000× reduction in work.</p>
+  <p>The catch is the <strong>edge problem</strong>: a query that lands near a Voronoi boundary has true neighbors sitting in cells you didn’t probe. Recall@10 with <code>nprobe</code> = 1 might be 40%; pushing to <code>nprobe</code> = 64 might reach 95% — at 64× the scan cost. <code>nprobe</code> is your first recall-vs-latency dial, and it is beautifully monotone: more probes, more recall, more time. Note what IVF does <em>not</em> fix: each probed list is still full of raw float vectors. For 100M × 768 dims you still hold 307&nbsp;GB somewhere. That is the problem product quantization attacks.</p>
+
+  <h3>Product quantization: 32× compression with arithmetic you can do in your head</h3>
+  <p>Jégou, Douze, and Schmid’s 2011 TPAMI paper is one of those rare results where the entire idea fits in two sentences. <em>Split each vector into m subvectors; vector-quantize each subspace independently with its own small codebook.</em> Concretely, the canonical configuration: a 128-dim float vector (512 bytes) is split into m = 16 subvectors of 8 dims each. For each of the 16 subspaces, run k-means to learn 256 centroids (an 8-bit codebook). A vector is then encoded as 16 centroid IDs × 8 bits = <strong>16 bytes — a 32× compression</strong>. The effective codebook is the Cartesian product of the 16 small ones: 256<sup>16</sup> = 2<sup>128</sup> distinct representable points, from only 16 × 256 × 8 dims × 4 B ≈ 131&nbsp;KB of stored centroids. You get the resolution of an astronomically large codebook at the training cost of sixteen tiny ones — that is the whole trick.</p>
+  <p>Distance computation is where PQ earns its keep. For a query q, precompute a lookup table: for each of the 16 subspaces, the squared distance from q’s subvector to each of the 256 centroids — a 16 × 256 table of floats, built once per query. The (asymmetric) distance to any database vector is then 16 table lookups and 15 adds. No floating-point multiplies per candidate; scanning millions of PQ codes becomes memory-bandwidth-bound on 16-byte codes instead of 512-byte vectors. The price is <strong>distortion</strong>: PQ distances are estimates, biased by quantization error, so recall suffers near decision boundaries. The standard remedy is <strong>re-ranking</strong>: use IVF-PQ to fetch, say, 200 candidates cheaply, then recompute exact distances on raw vectors for just those 200. FAISS’s IVFADC — inverted file plus asymmetric distance computation on PQ codes of the <em>residual</em> (vector minus its coarse centroid, which has lower variance and quantizes better) — is precisely this stack, and it is still the backbone of billion-scale deployments fifteen years later.</p>
+
+  <div class="aside"><span class="k">Field note</span>A team I advised stored raw 1536-dim OpenAI embeddings for 400M items in a key-value store “temporarily” and brute-forced shards of it with GPUs. Their monthly bill for what is, mathematically, an unindexed table scan exceeded the salary of the engineer who eventually replaced it with IVF-PQ — 2.4&nbsp;TB of floats became 38&nbsp;GB of codes, and p99 latency fell from 1.8&nbsp;s to 19&nbsp;ms at recall@10 = 0.96. Nobody had asked “what is the access method here?” because the vectors arrived through the ML door, not the database door.</div>
+
+  <h3>HNSW: the skip list, rediscovered as a graph</h3>
+  <p>Graph-based search takes a different bet: don’t partition space, <em>walk</em> it. Build a graph where each vector is a node connected to ~M of its near neighbors (typical M = 16–32); answer queries by greedy traversal — from some entry point, repeatedly move to the neighbor closest to the query, until no neighbor improves. On a pure kNN graph this gets stuck in local minima and takes O(N<sup>1/d</sup>)-ish hop counts across the space. Malkov and Yashunin’s HNSW (TPAMI 2018) fixes both with two ideas. First, <strong>navigability</strong>: during construction, edges are chosen with a diversity heuristic (an edge to candidate c is kept only if c is closer to the new node than to any already-selected neighbor), which preserves long-range “highway” links instead of M redundant short ones. Second, the <strong>hierarchy</strong>: each node is assigned a maximum layer ℓ drawn geometrically (P(layer ≥ ℓ) = e<sup>−ℓ/m<sub>L</sub></sup>), producing a stack of graphs where layer ℓ+1 has ~1/e the nodes of layer ℓ. Search starts at the sparse top layer, greedily descends — coarse hops first, fine hops last. If that sounds exactly like a skip list, it should: HNSW is a skip list generalized from a sorted line to a metric space, and the expected logarithmic search depth survives the generalization.</p>
+
+  <figure>
+    <svg viewBox="0 0 800 360" role="img" aria-label="HNSW layered graph with a search path descending from a sparse top layer to the dense bottom layer">
+      <style>text { font-family: 'IBM Plex Mono', monospace; fill: #1d1a15; }</style>
+      <!-- layer bands -->
+      <line x1="60" y1="70" x2="740" y2="62" stroke="#1d1a15" stroke-width="1" stroke-dasharray="2 5" opacity=".5"/>
+      <line x1="60" y1="185" x2="740" y2="178" stroke="#1d1a15" stroke-width="1" stroke-dasharray="2 5" opacity=".5"/>
+      <line x1="60" y1="300" x2="740" y2="294" stroke="#1d1a15" stroke-width="1" stroke-dasharray="2 5" opacity=".5"/>
+      <text x="62" y="44" font-size="12">layer 2 · sparse · highways</text>
+      <text x="62" y="159" font-size="12">layer 1</text>
+      <text x="62" y="274" font-size="12">layer 0 · all N nodes · efSearch beam</text>
+      <!-- layer 2 nodes -->
+      <circle cx="130" cy="68" r="9" fill="none" stroke="#93321b" stroke-width="2.5"/>
+      <circle cx="430" cy="62" r="7" fill="none" stroke="#1d1a15" stroke-width="2"/>
+      <circle cx="660" cy="66" r="7" fill="none" stroke="#1d1a15" stroke-width="2"/>
+      <path d="M139 67 Q 280 52 423 62" fill="none" stroke="#1d1a15" stroke-width="1.4"/>
+      <path d="M437 62 Q 545 78 653 66" fill="none" stroke="#1d1a15" stroke-width="1.4"/>
+      <text x="98" y="98" font-size="11" fill="#93321b">entry</text>
+      <!-- layer 1 nodes -->
+      <circle cx="130" cy="182" r="6" fill="none" stroke="#1d1a15" stroke-width="2"/>
+      <circle cx="300" cy="190" r="6" fill="none" stroke="#1d1a15" stroke-width="2"/>
+      <circle cx="430" cy="178" r="7" fill="none" stroke="#93321b" stroke-width="2.5"/>
+      <circle cx="560" cy="188" r="6" fill="none" stroke="#1d1a15" stroke-width="2"/>
+      <circle cx="660" cy="180" r="6" fill="none" stroke="#1d1a15" stroke-width="2"/>
+      <path d="M136 182 Q 215 170 294 189" fill="none" stroke="#1d1a15" stroke-width="1.2"/>
+      <path d="M306 189 Q 365 196 423 179" fill="none" stroke="#1d1a15" stroke-width="1.2"/>
+      <path d="M437 179 Q 500 168 554 187" fill="none" stroke="#1d1a15" stroke-width="1.2"/>
+      <path d="M566 187 Q 615 194 654 181" fill="none" stroke="#1d1a15" stroke-width="1.2"/>
+      <!-- layer 0 nodes -->
+      <circle cx="110" cy="298" r="5" fill="none" stroke="#1d1a15" stroke-width="1.8"/>
+      <circle cx="190" cy="306" r="5" fill="none" stroke="#1d1a15" stroke-width="1.8"/>
+      <circle cx="265" cy="294" r="5" fill="none" stroke="#1d1a15" stroke-width="1.8"/>
+      <circle cx="340" cy="304" r="5" fill="none" stroke="#1d1a15" stroke-width="1.8"/>
+      <circle cx="430" cy="296" r="6" fill="none" stroke="#93321b" stroke-width="2.5"/>
+      <circle cx="510" cy="305" r="5" fill="none" stroke="#1d1a15" stroke-width="1.8"/>
+      <circle cx="585" cy="293" r="6" fill="none" stroke="#93321b" stroke-width="2.5"/>
+      <circle cx="660" cy="302" r="5" fill="none" stroke="#1d1a15" stroke-width="1.8"/>
+      <circle cx="725" cy="296" r="5" fill="none" stroke="#1d1a15" stroke-width="1.8"/>
+      <path d="M115 298 Q 150 290 185 305" fill="none" stroke="#1d1a15" stroke-width="1.1"/>
+      <path d="M195 305 Q 228 296 260 295" fill="none" stroke="#1d1a15" stroke-width="1.1"/>
+      <path d="M270 295 Q 303 302 335 303" fill="none" stroke="#1d1a15" stroke-width="1.1"/>
+      <path d="M345 303 Q 385 292 424 296" fill="none" stroke="#1d1a15" stroke-width="1.1"/>
+      <path d="M436 296 Q 471 304 505 304" fill="none" stroke="#1d1a15" stroke-width="1.1"/>
+      <path d="M515 304 Q 548 294 579 294" fill="none" stroke="#1d1a15" stroke-width="1.1"/>
+      <path d="M591 294 Q 624 300 655 301" fill="none" stroke="#1d1a15" stroke-width="1.1"/>
+      <path d="M665 301 Q 693 294 720 296" fill="none" stroke="#1d1a15" stroke-width="1.1"/>
+      <!-- search path -->
+      <path d="M132 78 Q 270 110 425 70" fill="none" stroke="#93321b" stroke-width="2.5" stroke-dasharray="7 5"/>
+      <path d="M430 70 L 430 169" fill="none" stroke="#93321b" stroke-width="2.5" stroke-dasharray="7 5"/>
+      <path d="M430 187 L 430 288" fill="none" stroke="#93321b" stroke-width="2.5" stroke-dasharray="7 5"/>
+      <path d="M437 297 Q 510 320 578 296" fill="none" stroke="#93321b" stroke-width="2.5" stroke-dasharray="7 5"/>
+      <path d="M578 296 l -12 -3 m 12 3 l -10 7" stroke="#93321b" stroke-width="2.5" fill="none"/>
+      <!-- query marker -->
+      <text x="600" y="335" font-size="12" fill="#93321b">★ query’s true neighbor</text>
+      <text x="455" y="130" font-size="11" fill="#93321b">greedy descent</text>
+    </svg>
+    <figcaption>Fig. 6.1 — HNSW search. Enter at the sparse top layer, greedy-walk the long-range links, drop a layer each time the walk stalls, finish with a beam of width efSearch on layer 0. A skip list, generalized to a metric space.</figcaption>
+  </figure>
+
+  <p>Two knobs govern everything. <code>efConstruction</code> (typical 100–500) is the candidate-beam width while building: bigger means better edges, slower builds. <code>efSearch</code> is the beam width at query time on layer 0 — the algorithm maintains a priority queue of the <code>efSearch</code> best candidates instead of pure greedy. <code>efSearch</code> = 10 might give recall@10 = 0.80 in 30&nbsp;µs; <code>efSearch</code> = 200 gives 0.99 in 400&nbsp;µs. It is IVF’s <code>nprobe</code> wearing graph clothes — every ANN family ends up with exactly one such dial, and learning to read its trade curve is the actual skill.</p>
+  <p>HNSW’s sin is memory. The graph is useless without the vectors, traversal does random access, so <em>everything lives in RAM</em>: full-precision vectors plus adjacency. Budget it: 100M vectors × 768 dims × 4 B = 307&nbsp;GB of vectors, plus ~100M × M=32 edges × 4 B ≈ 13&nbsp;GB of graph, plus allocator overhead — call it 350&nbsp;GB of DRAM for one replica. At cloud prices, DRAM is ~20× the cost of NVMe per byte. That gap is the entire reason Thursday’s lecture exists.</p>
+</section>
+
+<section class="block">
+  <div class="sec-label">Lecture 2 · Thursday</div>
+  <h2>DiskANN and the Recall Axis</h2>
+
+  <p class="opener">Tuesday ended on an invoice: 350&nbsp;GB of DRAM to serve 100M vectors with HNSW, and a billion vectors simply off the table for a single node. The 2019 DiskANN paper from Microsoft Research asked the impolite question — what if the graph lived on SSD? — and answered it well enough that one 64&nbsp;GB-RAM machine with an NVMe drive could serve a billion vectors at 95%+ recall and ~5&nbsp;ms latency. The design is a small masterpiece of fitting an algorithm to a storage hierarchy, and it completes this course’s recurring argument: new workload, same physics. Today: how DiskANN works, how it learned to handle updates, and why every production system — purpose-built or bolted onto Postgres — converged on the same LSM-shaped answer.</p>
+
+  <h3>Vamana: a flatter graph, built for block storage</h3>
+  <p>DiskANN’s graph algorithm, Vamana, drops HNSW’s hierarchy entirely — one flat graph, searched greedily from a fixed medoid entry point. What it adds is a relaxed pruning rule: the α-parameter (typical α = 1.2) keeps an edge to candidate c only if no kept neighbor c′ satisfies α·dist(c′, c) &lt; dist(node, c). With α &gt; 1 the graph keeps <em>more aggressive long-range shortcuts</em> than HNSW’s heuristic would, deliberately overshooting toward the query. The payoff is fewer hops — and on SSD, hops are the whole cost model. DRAM lets HNSW afford a 60-hop stroll of 100&nbsp;ns accesses; an SSD random read is ~100&nbsp;µs, a thousand times worse, so the algorithm that wins on disk is the one that minimizes round trips, not distance computations. Same lesson as the B-tree in Week 2: fan-out and access count dominate when storage is slow. The layout is equally deliberate: each SSD block stores a node’s full-precision vector <em>and</em> its adjacency list together, so one 4&nbsp;KB read yields both the geometry and the next hops.</p>
+
+  <h3>PQ residuals in RAM, beam search on SSD</h3>
+  <p>The second half of the design is where Lecture 1 pays off. Greedy traversal must rank neighbors — but reading every candidate’s vector from SSD just to rank it would be ruinous. So DiskANN keeps a <strong>PQ-compressed copy of every vector in RAM</strong>: at ~32 bytes per code, a billion vectors fit in ~32&nbsp;GB. Navigation runs on cheap, slightly-wrong PQ distances in memory; the SSD is consulted only to fetch the adjacency lists along the path and the full-precision vectors of the final candidates for exact re-ranking. PQ is demoted from index to <em>steering mechanism</em> — its distortion barely matters because it only has to point the walk in roughly the right direction, and the exact re-rank at the end repairs the error.</p>
+  <p>To hide SSD latency, the search runs as <strong>beam search</strong> with beam width W (typical 4–8): issue W adjacency-list reads concurrently, merge results, repeat. NVMe drives deliver hundreds of thousands of random IOPS but only at queue depth — a beam of 4–8 keeps the device busy and cuts wall-clock hops nearly W-fold. A representative query: ~10 rounds × 4 parallel 4&nbsp;KB reads ≈ 40 I/Os ≈ 1–4&nbsp;ms, with PQ arithmetic essentially free beside it. Billion-scale, one node, five milliseconds, recall 0.95. The 2019 baseline for that workload was a DRAM cluster an order of magnitude more expensive.</p>
+
+  <div class="aside"><span class="k">Historical aside</span>The arc rhymes with 1970s hashing. Early hash tables assumed memory; databases needed disk; linear hashing and extendible hashing (1979–80) re-derived hashing under the constraint “one I/O per lookup.” DiskANN is the same move for similarity graphs — take an in-memory structure the workload demands, and re-derive it under the storage hierarchy you can afford. The access-method playbook hasn’t changed in fifty years; only the query has.</div>
+
+  <h3>Updates, and the inevitable LSM-shaped convergence</h3>
+  <p>Graphs hate deletes. Removing a node can sever the only navigable path through a region; in-place edge repair while queries traverse the graph is a concurrency nightmare. FreshDiskANN (2021) gave the streaming answer: inserts go to a small in-RAM Vamana index; deletes go to a <strong>tombstone set</strong> consulted at query time (deleted nodes are still <em>traversed</em> for navigation, just filtered from results — sever nothing, hide instead); periodically a background pass merges the RAM index into the SSD index and physically excises tombstoned nodes, repairing edges with the α-prune. Read it back slowly: a write-optimized in-memory delta, deletion markers, background compaction into a read-optimized structure. That is an LSM-tree. Nobody copied the design from Week 3 — the constraints forced it. Lucene (and so Elasticsearch and OpenSearch) builds an HNSW per immutable segment, tombstones deletes, and rebuilds graphs at segment merge. pgvector sits inside Postgres heap pages with MVCC handling versioning and vacuum doing the reclamation. Three independent codebases, one shape: <strong>immutable searchable units + tombstones + merge</strong>. When every lineage converges, you are looking at physics, not fashion.</p>
+
+  <h3>Recall: RUM grows a fourth axis</h3>
+  <p>The RUM conjecture (Week 4) said an access method balances Read, Update, and Memory overheads — optimize two, pay with the third. ANN indexes add a genuinely new axis: <strong>Recall</strong>. It is not a hidden constant; it is a knob the operator turns at query time. The same HNSW index serves recall 0.80 at 30&nbsp;µs and recall 0.99 at 400&nbsp;µs depending on one integer. This means a vector index is not characterized by a point (“QPS at p99”) but by a <em>curve</em> — recall-vs-latency at fixed memory, or recall-vs-memory at fixed latency — and comparing systems at unstated recall is the benchmark fraud of our decade. Treat recall as a resource to budget like CPU: an agent re-ranking 50 candidates through an LLM can buy cheap recall-0.85 retrieval and let the model absorb the noise; an agent doing exact-match memory lookup (“have I already filed this ticket?”) needs 0.99+ and should pay for it. Per-query recall targets are an API surface agents can actually use — they already set <code>temperature</code>; <code>min_recall</code> is the same kind of dial.</p>
+
+  <table>
+    <thead>
+      <tr><th>Property</th><th>IVF-PQ</th><th>HNSW</th><th>DiskANN (Vamana)</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>Memory, 100M × 768d</strong></td><td>~3–6 GB (codes + centroids; raw vectors on disk for re-rank)</td><td>~350 GB (full vectors + graph, all DRAM)</td><td>~6–10 GB RAM (PQ codes) + ~340 GB SSD</td></tr>
+      <tr><td><strong>Build cost</strong></td><td>Low — k-means train + assign; hours, parallelizes trivially</td><td>High — sequential-ish graph insertion, ~tens of core-hours per 100M</td><td>Highest — Vamana needs 2 passes + α-pruning; often built sharded then merged</td></tr>
+      <tr><td><strong>QPS / latency (1 node)</strong></td><td>High QPS, ~1–10 ms; SIMD table scans, batches beautifully</td><td>Highest — 10⁴–10⁵ QPS at 0.1–1 ms; random RAM access</td><td>~10³ QPS at 2–10 ms; bounded by SSD IOPS × beam width</td></tr>
+      <tr><td><strong>Recall behavior</strong></td><td>Ceiling limited by quantization; needs re-rank stage above ~0.95</td><td>0.99+ reachable by raising efSearch alone</td><td>0.95–0.99 with re-rank; recall per dollar is the headline</td></tr>
+      <tr><td><strong>Updates</strong></td><td>Easy appends; centroid drift forces periodic retrain</td><td>Inserts fine; deletes poison the graph → segment + rebuild</td><td>FreshDiskANN: RAM delta + tombstones + background merge</td></tr>
+      <tr><td><strong>Use when</strong></td><td>Huge N, tight memory, batch/offline tolerance</td><td>Latency is king and DRAM is paid for</td><td>Billion-scale on commodity nodes; cost is king</td></tr>
+    </tbody>
+  </table>
+
+  <h3>The agent angle: vector-as-feature beat vector-as-product</h3>
+  <p>Around 2021–2023, venture capital funded the proposition that ANN search was a database <em>category</em>. By 2025 the answer was in: Postgres grew pgvector, Elasticsearch and OpenSearch shipped HNSW, MongoDB and Redis and SQLite and every cloud warehouse added vector columns, and the standalone vendors pivoted toward “memory platforms.” The reason is the thesis of this course. An agent’s retrieval almost never arrives alone — it is <code>WHERE tenant_id = ? AND created_at &gt; ? ORDER BY embedding &lt;=&gt; ? LIMIT 20</code>, similarity <em>joined with</em> predicates, freshness, and transactions. Filtered ANN is an open research problem precisely because the filter interacts with graph connectivity (filter out 99% of nodes and your navigable graph disconnects), and solving it requires sitting <em>inside</em> a query planner, next to the other indexes, with shared statistics — not across a network hop in a separate product. B-trees were never a company. Vector indexes are access methods, and access methods belong inside engines.</p>
+
+  <div class="pull">Recall is the fourth resource. <b>You don’t maximize it — you budget it</b>, query by query, like CPU.</div>
+</section>
+
+<section class="block">
+  <div class="sec-label">Readings</div>
+  <h2>Read Before Thursday</h2>
+  <div class="reads-block">
+    <div class="read-row"><div class="n">1</div><div class="t"><i>Product Quantization for Nearest Neighbor Search</i> — Jégou, Douze &amp; Schmid, IEEE TPAMI 2011.<span class="v">The codebook math behind every compressed vector index. Work through §III until the 256^16-codebook trick and the asymmetric distance tables feel obvious; skim the GIST results.</span></div></div>
+    <div class="read-row"><div class="n">2</div><div class="t"><i>Efficient and Robust Approximate Nearest Neighbor Search Using Hierarchical Navigable Small World Graphs</i> — Malkov &amp; Yashunin, IEEE TPAMI 2018.<span class="v">Focus on the neighbor-selection heuristic (Alg. 4) and the layer assignment — the skip-list analogy is in the paper. Note carefully what the memory model assumes.</span></div></div>
+    <div class="read-row"><div class="n">3</div><div class="t"><i>DiskANN: Fast Accurate Billion-point Nearest Neighbor Search on a Single Node</i> — Subramanya, Devvrit, Simhadri, Krishnaswamy &amp; Kadekodi, NeurIPS 2019.<span class="v">Read for the systems decisions, not the graph theory: why α &gt; 1, why PQ steers while SSD stores, why node + adjacency share a block. Compare its cost model against HNSW’s before class.</span></div></div>
+  </div>
+</section>
+
+<section class="block">
+  <div class="sec-label">Exercises</div>
+  <h2>This Week’s Problems</h2>
+  <div class="exercise">
+    <div class="ex-head">Exercise 6.1 · warm-up</div>
+    <div class="ex-body"><p>Do the budgets by hand. (a) For N = 1B vectors at d = 768 float32: compute raw storage, HNSW DRAM footprint (M = 32 edges, 4-byte IDs), and the RAM needed for DiskANN’s PQ codes at 32 B/vector. (b) For PQ with m = 24 subvectors and 8-bit codebooks on d = 768: code size, compression ratio, total codebook storage, and the size of the per-query distance table. (c) At 50 GB/s memory bandwidth, what is the floor on brute-force latency for (a), and how many 100 µs SSD round trips equal it?</p></div>
+  </div>
+  <div class="exercise">
+    <div class="ex-head">Exercise 6.2 · core</div>
+    <div class="ex-body"><p>Implement IVF-PQ in ~300 lines (NumPy permitted, FAISS forbidden) on the 1M-vector GloVe-100 dataset from ann-benchmarks: k-means for nlist = 1024 coarse centroids, PQ with m = 10 on residuals, asymmetric distance tables, and optional exact re-ranking of the top-200. Produce one plot: recall@10 vs mean query latency, sweeping nprobe ∈ {1, 2, 4, …, 128}, with and without re-ranking. Then answer in one paragraph: where does the no-re-rank curve plateau, and which term in the PQ error analysis explains the ceiling?</p></div>
+  </div>
+  <div class="exercise">
+    <div class="ex-head">Exercise 6.3 · stretch</div>
+    <div class="ex-body"><p>Filtered ANN is unsolved; take a real swing at it. Using your Exercise 6.2 index or an HNSW you build, attach a uniformly random categorical label to each vector and study queries of the form “top-10 neighbors WHERE label = X” as label selectivity drops from 50% to 0.1%. Compare at least three strategies: post-filtering (search then discard), pre-filtering (brute-force the matching subset), and an integrated approach of your own design — e.g., label-aware edges during graph construction, per-label entry points, or selectivity-based planning that switches strategy at a crossover you derive. Report the recall-vs-latency curves at each selectivity, find empirical crossover points, and write one page on what a query optimizer would need (statistics, cost model, index metadata) to choose the strategy automatically. A serious attempt at the integrated method, with an honest account of where it breaks, earns full credit even if it loses to brute force.</p></div>
+  </div>
+  <div class="fleuron">❦</div>
+</section>
+
+<nav class="pager">
+  <a href="week-05.html"><span class="dir">← Week 05</span><span class="ttl">Learned Components</span></a>
+  <a class="next" href="week-07.html"><span class="dir">Week 07 →</span><span class="ttl">The Lakehouse &amp; Open Formats</span></a>
+</nav>
+
+</main>
+
+<footer class="site">
+  <div class="inner">
+    <span>DATA 2027 — a course that doesn’t exist yet · <a href="../index.html">Essay № 01</a> · <a href="../course.html">Essay № 02</a></span>
+    <span>CC BY 4.0 · built with <a href="https://claude.com/claude-code">Claude Code</a></span>
+  </div>
+</footer>
+
+</body>
+</html>

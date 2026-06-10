@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Week 1: The Client Has Changed — DATA 2027</title>
+<meta name="description" content="Week 1 of DATA 2027: the classical five-component DBMS architecture, one SELECT traced end-to-end, and the measured anatomy of the agentic workload.">
+<meta name="theme-color" content="#f6f1e7">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23f6f1e7'/%3E%3Cellipse cx='50' cy='28' rx='30' ry='12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 28v44c0 6.6 13.4 12 30 12s30-5.4 30-12V28' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 50c0 6.6 13.4 12 30 12s30-5.4 30-12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500;9..144,600;9..144,900&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400;1,6..72,500&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="course.css">
+</head>
+<body>
+
+<div class="masthead">
+  <span><a href="index.html">DATA 2027</a> <span class="dot">●</span> DATA SYSTEMS IN THE AGENTIC ERA</span>
+  <span><a href="index.html">← SCHEDULE</a></span>
+</div>
+
+<header class="page-head">
+  <div class="kicker">Week 01 · Part I — Foundations Under New Workloads</div>
+  <h1>The Client Has <em>Changed</em></h1>
+  <p class="standfirst">For fifty years, database architecture was tuned for a human on the other end of the socket. This week we learn the classical machine in detail — then measure what happens when the client becomes a language model that never sleeps, never remembers, and asks everything five ways at once.</p>
+  <div class="meta"><b>Lectures:</b> Tue — Anatomy of a DBMS: the five components · Thu — The agentic workload, measured &nbsp;·&nbsp; <b>Lab:</b> Fri — Instrumenting Postgres under a synthetic agent workload</div>
+</header>
+
+<main>
+
+<section class="block">
+  <div class="objectives">
+    <div class="k">Learning objectives — after this week you can…</div>
+    <ul>
+      <li>Name the five architectural components of a classical DBMS (Hellerstein, Stonebraker &amp; Hamilton, FnT 2007) and state what each owns and what each assumes about the client.</li>
+      <li>Trace a single <code>SELECT</code> end-to-end — parser, rewriter, optimizer, executor, buffer pool — and assign a defensible latency budget to each stage.</li>
+      <li>Characterize the agentic workload quantitatively: session length, fan-out, duplicate rate, introspection frequency, and inter-statement think-time.</li>
+      <li>Explain why LLM think-time inside open transactions poisons lock-based concurrency control, with a back-of-envelope lock-hold-time argument.</li>
+      <li>Identify which of the classical assumptions break under agents (and which don’t — the physics of B-trees and fsync survive unchanged).</li>
+    </ul>
+  </div>
+</section>
+
+<section class="block">
+  <div class="sec-label">Lecture 1 · Tuesday</div>
+  <h2>Anatomy of a DBMS: The Five Components</h2>
+
+  <p class="opener">Every serious relational engine — Postgres, MySQL, Oracle, SQL Server, DB2 — converged on essentially the same internal organization, and the canonical map of it is Hellerstein, Stonebraker &amp; Hamilton’s <i>Architecture of a Database System</i> (Foundations and Trends in Databases, 2007). The paper divides the system into five interacting components, and the division is not arbitrary: each component encapsulates one hard systems problem. You should be able to draw this diagram from memory by Friday, because the rest of the semester is a guided tour of what happens to each box when its oldest assumption — a human client — quietly stops being true.</p>
+
+  <h3>The five boxes</h3>
+  <p>First, the <strong>process manager</strong> handles admission control and the mapping of client connections to workers — process-per-connection (classic Postgres), thread-per-connection (MySQL), or a thread pool with a worker queue (SQL Server). Its core job is to decide <em>when</em> work enters the system: admit too much and you thrash the buffer pool; admit too little and you waste the hardware. Second, the <strong>query processor</strong> turns SQL strings into results: parser → rewriter → optimizer → executor. Third, the <strong>transactional storage manager</strong> is the deepest layer: access methods (heaps, B+-trees), the buffer pool, the lock manager, and the log manager, welded together so that ACID emerges from their cooperation — this is where ARIES-style write-ahead logging and two-phase locking live. Fourth and fifth, the paper groups <strong>shared components</strong> (the catalog, the memory allocator, replication and loading utilities) and <strong>administration and monitoring</strong>. Memorize the ownership boundaries: the optimizer never touches a disk page; the buffer pool never sees SQL; the lock manager doesn’t know what a join is. That separation of concerns is the reason these systems survived five decades of hardware churn.</p>
+
+  <h3>One SELECT, end to end</h3>
+  <p>Take the most boring query imaginable, sent from an application in the same availability zone:</p>
+  <pre><code>SELECT o.status, o.total_cents
+FROM   orders o
+WHERE  o.id = 48121;</code></pre>
+  <p>The bytes arrive over TCP and the process manager hands them to a worker. The <strong>parser</strong> tokenizes and builds an AST, resolving <code>orders</code> and its columns against the <strong>catalog</strong> — note this carefully: even parsing requires catalog reads, which is why the catalog is a shared, cached, contended structure. The <strong>rewriter</strong> expands views and applies constant folding. The <strong>optimizer</strong> enumerates plans — here trivially: a unique index on <code>id</code> exists, so it’s an index lookup, selectivity 1/N, cost roughly 4 page reads (3 B+-tree levels plus one heap page). The <strong>executor</strong> runs the plan as a pull-based iterator tree: <code>IndexScan</code> calls into the access method, the access method asks the <strong>buffer pool</strong> for page 7841, and — if we’re lucky — the page is already resident and pinned in a frame, so no I/O occurs. A shared lock (or in Postgres’s MVCC world, a snapshot visibility check) confirms the row version is visible to our transaction. One tuple flows up the iterator tree, gets serialized into the wire protocol, and goes back over TCP.</p>
+
+  <h3>The latency budget</h3>
+  <p>Numbers, not vibes. For the warm-cache point lookup above, against a well-tuned Postgres in the same AZ:</p>
+  <table>
+    <thead>
+      <tr><th>Stage</th><th>Typical cost (warm)</th><th>Share of ~1.1 ms total</th><th>Notes</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Network (RTT, same AZ)</td><td>~500 µs</td><td>~45%</td><td>Cross-region: 30–80 ms — swamps everything</td></tr>
+      <tr><td>Parse + catalog lookup</td><td>~50 µs</td><td>~5%</td><td>Avoidable via prepared statements</td></tr>
+      <tr><td>Plan (optimize)</td><td>100–300 µs</td><td>~15%</td><td>Grows superlinearly with join count</td></tr>
+      <tr><td>Execute (buffer-pool hit)</td><td>50–150 µs</td><td>~10%</td><td>A cold read adds 100 µs (NVMe) to 10 ms (network storage)</td></tr>
+      <tr><td>Serialize + return</td><td>~100 µs</td><td>~10%</td><td>Per-row cost; large result sets shift the budget here</td></tr>
+      <tr><td>Connection setup (amortized)</td><td>~150 µs</td><td>~15%</td><td>Un-amortized: a fresh Postgres connection costs 10–50 ms</td></tr>
+    </tbody>
+  </table>
+  <p>Two lessons hide in this table. First, for point queries <em>the database is not the bottleneck — the wire is</em>, which means a client that issues 100× more queries multiplies the part of the budget the DBMS can’t optimize away. Second, parse and plan together cost more than execution. For a human issuing twelve queries an hour, who cares. For a client issuing thousands of structurally-similar queries, the parse/plan column suddenly becomes the system’s hottest code path — hold that thought until Thursday.</p>
+
+  <div class="aside">
+    <span class="k">Field note</span>
+    The 2007 paper has a wonderful throwaway line: commercial systems assume “a relatively small number of relatively long-lived connections.” Every sizing default descends from that sentence — Postgres ships with <code>max_connections = 100</code>. In 2024–2026, serverless platforms watched agents open hundreds of short-lived connections per task and had to bolt poolers (PgBouncer, RDS Proxy, Neon’s proxy) in front of every database they sold. The architecture didn’t bend; the deployment did.
+  </div>
+
+  <h3>Where the pressure lands</h3>
+  <p>Here is the classical diagram, with the four places the agentic workload presses hardest marked in oxblood. Keep it in view during Thursday’s lecture.</p>
+
+  <figure>
+    <svg viewBox="0 0 800 360" role="img" aria-label="Classical DBMS architecture with agent-era pressure points">
+      <rect x="0" y="0" width="800" height="360" fill="#efe8d8"/>
+      <!-- client -->
+      <rect x="22" y="28" width="138" height="52" fill="none" stroke="#1d1a15" stroke-width="2"/>
+      <text x="91" y="50" font-family="monospace" font-size="13" fill="#1d1a15" text-anchor="middle">CLIENT</text>
+      <text x="91" y="68" font-family="monospace" font-size="11" fill="#93321b" text-anchor="middle">(now an agent)</text>
+      <!-- arrow client -> process mgr -->
+      <line x1="160" y1="54" x2="218" y2="54" stroke="#1d1a15" stroke-width="2"/>
+      <path d="M218 54 l-10 -5 v10 z" fill="#1d1a15"/>
+      <!-- process manager -->
+      <rect x="222" y="28" width="338" height="52" fill="none" stroke="#1d1a15" stroke-width="2"/>
+      <text x="391" y="50" font-family="monospace" font-size="13" fill="#1d1a15" text-anchor="middle">PROCESS MANAGER</text>
+      <text x="391" y="68" font-family="monospace" font-size="11" fill="#1d1a15" text-anchor="middle">admission control · dispatch</text>
+      <!-- arrow down -->
+      <line x1="391" y1="80" x2="391" y2="106" stroke="#1d1a15" stroke-width="2"/>
+      <path d="M391 106 l-5 -10 h10 z" fill="#1d1a15"/>
+      <!-- query processor -->
+      <rect x="222" y="110" width="338" height="92" fill="none" stroke="#1d1a15" stroke-width="2"/>
+      <text x="391" y="130" font-family="monospace" font-size="13" fill="#1d1a15" text-anchor="middle">QUERY PROCESSOR</text>
+      <rect x="238" y="144" width="70" height="40" fill="none" stroke="#1d1a15" stroke-width="1.5"/>
+      <text x="273" y="168" font-family="monospace" font-size="10" fill="#1d1a15" text-anchor="middle">parser</text>
+      <rect x="320" y="144" width="70" height="40" fill="none" stroke="#1d1a15" stroke-width="1.5"/>
+      <text x="355" y="168" font-family="monospace" font-size="10" fill="#1d1a15" text-anchor="middle">rewriter</text>
+      <rect x="402" y="144" width="70" height="40" fill="none" stroke="#1d1a15" stroke-width="1.5"/>
+      <text x="437" y="168" font-family="monospace" font-size="10" fill="#1d1a15" text-anchor="middle">optimizer</text>
+      <rect x="484" y="144" width="64" height="40" fill="none" stroke="#1d1a15" stroke-width="1.5"/>
+      <text x="516" y="168" font-family="monospace" font-size="10" fill="#1d1a15" text-anchor="middle">executor</text>
+      <line x1="308" y1="164" x2="320" y2="164" stroke="#1d1a15" stroke-width="1.5"/>
+      <line x1="390" y1="164" x2="402" y2="164" stroke="#1d1a15" stroke-width="1.5"/>
+      <line x1="472" y1="164" x2="484" y2="164" stroke="#1d1a15" stroke-width="1.5"/>
+      <!-- arrow down -->
+      <line x1="391" y1="202" x2="391" y2="228" stroke="#1d1a15" stroke-width="2"/>
+      <path d="M391 228 l-5 -10 h10 z" fill="#1d1a15"/>
+      <!-- storage manager -->
+      <rect x="222" y="232" width="338" height="100" fill="none" stroke="#1d1a15" stroke-width="2"/>
+      <text x="391" y="252" font-family="monospace" font-size="13" fill="#1d1a15" text-anchor="middle">TXN STORAGE MANAGER</text>
+      <rect x="238" y="266" width="92" height="52" fill="none" stroke="#1d1a15" stroke-width="1.5"/>
+      <text x="284" y="288" font-family="monospace" font-size="10" fill="#1d1a15" text-anchor="middle">access</text>
+      <text x="284" y="302" font-family="monospace" font-size="10" fill="#1d1a15" text-anchor="middle">methods</text>
+      <rect x="342" y="266" width="92" height="52" fill="none" stroke="#1d1a15" stroke-width="1.5"/>
+      <text x="388" y="288" font-family="monospace" font-size="10" fill="#1d1a15" text-anchor="middle">buffer</text>
+      <text x="388" y="302" font-family="monospace" font-size="10" fill="#1d1a15" text-anchor="middle">pool</text>
+      <rect x="446" y="266" width="102" height="52" fill="none" stroke="#1d1a15" stroke-width="1.5"/>
+      <text x="497" y="288" font-family="monospace" font-size="10" fill="#1d1a15" text-anchor="middle">lock mgr ·</text>
+      <text x="497" y="302" font-family="monospace" font-size="10" fill="#1d1a15" text-anchor="middle">log mgr</text>
+      <!-- shared components -->
+      <rect x="608" y="110" width="170" height="222" fill="none" stroke="#1d1a15" stroke-width="2"/>
+      <text x="693" y="132" font-family="monospace" font-size="12" fill="#1d1a15" text-anchor="middle">SHARED COMPONENTS</text>
+      <rect x="624" y="148" width="138" height="40" fill="none" stroke="#1d1a15" stroke-width="1.5"/>
+      <text x="693" y="172" font-family="monospace" font-size="10" fill="#1d1a15" text-anchor="middle">catalog</text>
+      <rect x="624" y="200" width="138" height="40" fill="none" stroke="#1d1a15" stroke-width="1.5"/>
+      <text x="693" y="224" font-family="monospace" font-size="10" fill="#1d1a15" text-anchor="middle">memory mgr</text>
+      <rect x="624" y="252" width="138" height="40" fill="none" stroke="#1d1a15" stroke-width="1.5"/>
+      <text x="693" y="276" font-family="monospace" font-size="10" fill="#1d1a15" text-anchor="middle">replication · admin</text>
+      <line x1="560" y1="156" x2="624" y2="168" stroke="#1d1a15" stroke-width="1.5" stroke-dasharray="4 4"/>
+      <!-- pressure points -->
+      <circle cx="240" cy="44" r="11" fill="none" stroke="#93321b" stroke-width="2.5"/>
+      <text x="240" y="49" font-family="monospace" font-size="11" fill="#93321b" text-anchor="middle" font-weight="bold">1</text>
+      <circle cx="437" cy="132" r="11" fill="none" stroke="#93321b" stroke-width="2.5"/>
+      <text x="437" y="137" font-family="monospace" font-size="11" fill="#93321b" text-anchor="middle" font-weight="bold">2</text>
+      <circle cx="630" cy="138" r="11" fill="none" stroke="#93321b" stroke-width="2.5"/>
+      <text x="630" y="143" font-family="monospace" font-size="11" fill="#93321b" text-anchor="middle" font-weight="bold">3</text>
+      <circle cx="463" cy="252" r="11" fill="none" stroke="#93321b" stroke-width="2.5"/>
+      <text x="463" y="257" font-family="monospace" font-size="11" fill="#93321b" text-anchor="middle" font-weight="bold">4</text>
+      <!-- legend -->
+      <text x="22" y="130" font-family="monospace" font-size="11" fill="#93321b">PRESSURE POINTS</text>
+      <text x="22" y="152" font-family="monospace" font-size="10.5" fill="#1d1a15">1 admission ctrl:</text>
+      <text x="22" y="166" font-family="monospace" font-size="10.5" fill="#93321b">  speculative fan-out</text>
+      <text x="22" y="188" font-family="monospace" font-size="10.5" fill="#1d1a15">2 optimizer:</text>
+      <text x="22" y="202" font-family="monospace" font-size="10.5" fill="#93321b">  near-dup plans</text>
+      <text x="22" y="224" font-family="monospace" font-size="10.5" fill="#1d1a15">3 catalog:</text>
+      <text x="22" y="238" font-family="monospace" font-size="10.5" fill="#93321b">  info_schema hot path</text>
+      <text x="22" y="260" font-family="monospace" font-size="10.5" fill="#1d1a15">4 lock manager:</text>
+      <text x="22" y="274" font-family="monospace" font-size="10.5" fill="#93321b">  LLM think-time holds</text>
+      <text x="22" y="288" font-family="monospace" font-size="10.5" fill="#93321b">  locks for seconds</text>
+    </svg>
+    <figcaption>Fig. 1.1 — The five-component architecture of Hellerstein, Stonebraker &amp; Hamilton (FnT 2007), redrawn with the four agent-era pressure points in oxblood. Nothing in the black ink changes this semester; everything in red does.</figcaption>
+  </figure>
+
+  <h3>What the architecture assumes about you</h3>
+  <p>Close Tuesday by making the implicit explicit. The classical design assumes: (a) connections are long-lived and few; (b) queries arrive at human cadence, so per-query overheads like parsing are noise; (c) the working set is shaped by a stable application, so the buffer pool’s LRU-ish policies converge; (d) transactions are short because application code between statements executes in microseconds; (e) metadata queries are rare — the developer read the schema once, in a design doc. Every one of these is a statement about <em>client behavior</em>, not about storage physics. Which is exactly why they’re the assumptions that can break.</p>
+</section>
+
+<section class="block">
+  <div class="sec-label">Lecture 2 · Thursday</div>
+  <h2>The Agentic Workload, Measured</h2>
+
+  <p class="opener">Strip away the hype and ask the only question a systems person should ask: what does the workload look like on the wire? When the client is an LLM-driven agent — a coding assistant exploring a schema, an analytics agent answering a business question, a provisioning agent standing up infrastructure — the traces look unlike anything the 2007 architecture was tuned for. Neon reported in 2025 that roughly <strong>80% of new databases on its platform were created by agents rather than humans</strong>; the dominant client of the managed-Postgres business changed in under two years. The workload changed with it, along five measurable axes.</p>
+
+  <h3>Session shape: tens become thousands</h3>
+  <p>A human analyst at a SQL prompt issues on the order of tens of queries per session — write, stare, sip coffee, refine. An agent solving one task routinely issues <strong>hundreds to thousands</strong>: it introspects the schema, samples rows from candidate tables, tries a query, reads the error, retries, cross-checks its answer with a second formulation, then runs the final query. The per-query cost model inverts. At 40 queries/session, a 300 µs plan cost is 12 ms of total optimizer time — irrelevant. At 4,000 queries, it’s 1.2 seconds of pure CPU per session, multiplied by every concurrent agent. Fixed per-query overheads that were engineering rounding errors become first-order terms. This is the central quantitative claim of the course: <em>agents don’t change the physics; they change which terms in the cost model dominate.</em></p>
+
+  <table>
+    <thead>
+      <tr><th>Dimension</th><th>Human client (circa 2015)</th><th>Agent client (circa 2026)</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Queries per session</td><td>~10–50</td><td>~500–5,000</td></tr>
+      <tr><td>Inter-statement gap</td><td>seconds–minutes (thinking, typing)</td><td>50 ms–10 s (token generation)</td></tr>
+      <tr><td>Schema introspection</td><td>rare; humans read docs once</td><td>every session; <code>information_schema</code> is the hot path</td></tr>
+      <tr><td>Semantic duplicates</td><td>low; humans reuse their last query</td><td>high; same intent, k textual variants</td></tr>
+      <tr><td>Speculation</td><td>none; one query at a time</td><td>fan-out of 3–10 parallel probes, most discarded</td></tr>
+      <tr><td>Error handling</td><td>stop, read, ask a colleague</td><td>instant retry, often with the same mistake rephrased</td></tr>
+      <tr><td>Staleness tolerance</td><td>implicit, unstated</td><td>often explicit and large — “yesterday’s data is fine”</td></tr>
+    </tbody>
+  </table>
+
+  <h3>information_schema as a hot path</h3>
+  <p>An agent has no persistent memory of your schema. Every session begins with discovery: <code>SELECT table_name, column_name, data_type FROM information_schema.columns …</code>, foreign-key crawls over <code>pg_constraint</code>, a few <code>SELECT * … LIMIT 5</code> samples to learn value distributions. Catalog views were designed as cold administrative paths — many are implemented as unindexed joins over a dozen system tables — and now they’re executed at the top of every agent session, by every agent, concurrently. The fix is not faster catalogs; it’s <em>curated context</em>. Anthropic’s self-service analytics work (June 2026) is the canonical measurement: agents answering business questions over the warehouse succeeded on roughly <strong>21%</strong> of questions with raw schema access, and <strong>95%</strong> once given curated semantic context — table descriptions, certified metric definitions, join-path documentation. A 4.5× improvement, and not one byte of it came from the storage engine. The leverage moved up the stack, into metadata. Week 9 is entirely about this.</p>
+
+  <h3>Speculative fan-out and near-duplicate queries</h3>
+  <p>Agents hedge. Asked “why did revenue dip in March?”, a planner-style agent may dispatch five probe queries in parallel — by region, by product, by channel, by cohort, by data-quality check — knowing it will use one or two. From the database’s perspective this is a burst of concurrent, expensive, <em>mostly wasted</em> analytical work, which classical admission control (built to protect against too many users, not too many hypotheses from one user) handles badly. Relatedly, agents generate <strong>near-duplicate semantic queries</strong>: <code>WHERE created_at &gt;= '2026-03-01'</code> versus <code>WHERE created_at &gt; '2026-02-28'</code>, aliases renamed, column order shuffled. Textual plan caches miss; the optimizer replans from scratch each time. A cache keyed on normalized plan structure — or a result cache keyed on semantic equivalence — would absorb most of it. No mainstream engine ships one yet. This is a thesis-shaped hole.</p>
+
+  <h3>Think-time inside transactions: the lock-manager poison</h3>
+  <p>The sharpest failure is also the simplest. Interactive transactions assume the client’s “think time” between statements is application code: microseconds. An agent’s think time between statements is <em>token generation</em>: 500 ms to 10 s while the model decides what to do next. Now do the arithmetic for a two-phase-locking system. If a transaction holds a row lock for duration <i>H</i> and conflicting transactions arrive at rate λ, expected queue depth grows like λ·<i>H</i>. Raise <i>H</i> from 2 ms to 4 s — a 2,000× increase — and a lock that conflicted once a day now backs up a thousand waiters. The same arithmetic applies, gentler but real, to MVCC: long snapshots block vacuum/garbage collection and bloat version chains. The remedies are old ideas with new urgency: autocommit by default, optimistic concurrency with retry, moving multi-statement logic into the database (stored procedures the agent invokes atomically), or — most interesting — session-level <em>staleness contracts</em>, since the agent that tolerates yesterday’s data needs no locks at all. Weeks 5 and 6 take these apart properly.</p>
+
+  <div class="pull">The database didn’t slow down. The client started <b>thinking out loud</b> while holding the lock.</div>
+
+  <div class="aside">
+    <span class="k">Historical aside</span>
+    We have been here before. <i>What Goes Around Comes Around</i> documents how every generation rediscovers the same data-model arguments under new branding — IMS begat XML begat JSON. The pattern repeats at the workload layer too: the 1970s batch-vs-interactive transition forced timesharing admission control; the 1990s web transition forced connection pooling; the mobile transition forced offline sync. Each time, pundits announced the death of the relational database. Each time, the architecture absorbed the workload by adding a layer. The null hypothesis for the agentic era is the same — and this course will spend thirteen more weeks testing it.
+  </div>
+
+  <h3>What does not change</h3>
+  <p>End with discipline. The agent client does not repeal physics. fsync still costs what it costs; a B+-tree point lookup is still O(log<sub>B</sub> N) page accesses; the buffer pool still lives or dies by its hit ratio; ARIES still recovers correctly. Serializability is still defined by conflict graphs, and an agent that needs read-modify-write isolation needs it exactly as much as a Perl script did in 1999. The discipline of this course is to sort every observed “AI database problem” into one of two bins: <em>workload problems</em>, which we solve with caching, scheduling, admission control, context curation, and API design — and <em>physics problems</em>, which were already solved and must not be unsolved by enthusiasm. Most of what you’ll read on vendor blogs belongs in bin one. The interesting research lives at the boundary.</p>
+</section>
+
+<section class="block">
+  <div class="sec-label">Readings</div>
+  <h2>Read Before Thursday</h2>
+  <div class="reads-block">
+    <div class="read-row"><div class="n">1</div><div class="t"><i>Architecture of a Database System</i> — Hellerstein, Stonebraker &amp; Hamilton, Foundations and Trends in Databases, 2007. Sections 1–4 only.<span class="v">The canonical map of the machine. Focus on the process model (§2) and the life of a query (§1.1) — and, on every page, ask which stated assumption is about client behavior.</span></div></div>
+    <div class="read-row"><div class="n">2</div><div class="t"><i>What Goes Around Comes Around</i> — Stonebraker &amp; Hellerstein, in <i>Readings in Database Systems</i>.<span class="v">Thirty-five years of data-model fashion cycles in twenty pages. Read it as inoculation: learn to recognize a rebranded old idea before Week 3 asks you to.</span></div></div>
+    <div class="read-row"><div class="n">3</div><div class="t"><i>Self-Service Analytics with Claude</i> — Anthropic engineering blog, June 2026.<span class="v">The 21%→95% result. Focus on what “curated context” concretely contained, and notice that none of the gains required touching the database engine.</span></div></div>
+  </div>
+</section>
+
+<section class="block">
+  <div class="sec-label">Exercises</div>
+  <h2>This Week’s Problems</h2>
+  <div class="exercise">
+    <div class="ex-head">Exercise 1.1 · warm-up</div>
+    <div class="ex-body"><p>Using the Tuesday latency-budget table, compute total wall-clock time spent in (a) network, (b) parse+plan, and (c) execute, for a human session of 40 point queries and an agent session of 4,000. Repeat with cross-region networking (RTT 60 ms). For each of the four scenarios, name the single optimization with the highest payoff, and state in one sentence why prepared statements help the agent far more than they ever helped the human.</p></div>
+  </div>
+  <div class="exercise">
+    <div class="ex-head">Exercise 1.2 · core</div>
+    <div class="ex-body"><p>Build a synthetic agent against local Postgres. Your script must: (1) introspect <code>information_schema.columns</code> and sample 5 rows from each table; (2) issue 500 near-duplicate queries — same semantics, varied literals, aliases, and whitespace; (3) open a transaction, update one row, sleep a “think-time” <i>T</i> drawn uniformly from [0.5 s, 5 s], then commit, while 8 concurrent workers contend for the same row. Using <code>pg_stat_statements</code> and <code>pg_locks</code>, report: parse+plan time as a fraction of total query time in phase 2 (with and without prepared statements), and p50/p99 lock-wait time in phase 3 as a function of <i>T</i>. Two plots, one paragraph of interpretation each.</p></div>
+  </div>
+  <div class="exercise">
+    <div class="ex-head">Exercise 1.3 · stretch</div>
+    <div class="ex-body"><p>Design an admission-control policy for speculative fan-out. An agent dispatches <i>k</i> parallel probe queries with estimated costs <i>c₁…c_k</i>, will ultimately consume the results of exactly one (unknown a priori, with prior probabilities <i>p_i</i>), and may cancel the rest the moment it commits to a branch. Formalize the scheduler’s decision: under what conditions on <i>k</i>, the <i>p_i</i>, system load ρ, and cancellation latency does admitting all probes minimize the agent’s expected end-to-end latency, versus serializing them in descending <i>p_i</i> order, versus admitting a budgeted subset? Propose a concrete protocol extension (wire-level) by which an agent could declare “speculative, priority <i>p_i</i>, cancellable” per statement, and argue what the executor should do differently with that hint. There is no known complete answer; a rigorous partial model with honest stated assumptions earns full credit.</p></div>
+  </div>
+  <div class="fleuron">❦</div>
+</section>
+
+<nav class="pager">
+  <a href="index.html"><span class="dir">← Course home</span><span class="ttl">Course home</span></a>
+  <a class="next" href="week-02.html"><span class="dir">Week 02 →</span><span class="ttl">B-Trees, LSM-Trees &amp; the RUM Triangle</span></a>
+</nav>
+
+</main>
+
+<footer class="site">
+  <div class="inner">
+    <span>DATA 2027 — a course that doesn’t exist yet · <a href="../index.html">Essay № 01</a> · <a href="../course.html">Essay № 02</a></span>
+    <span>CC BY 4.0 · built with <a href="https://claude.com/claude-code">Claude Code</a></span>
+  </div>
+</footer>
+
+</body>
+</html>

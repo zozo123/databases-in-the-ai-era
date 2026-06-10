@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Week 5: Learned Components — DATA 2027</title>
+<meta name="description" content="Learned indexes from Kraska to SOSD, Bao&#39;s hint-set steering, and why ML advising a classical engine beat ML replacing it.">
+<meta name="theme-color" content="#f6f1e7">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23f6f1e7'/%3E%3Cellipse cx='50' cy='28' rx='30' ry='12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 28v44c0 6.6 13.4 12 30 12s30-5.4 30-12V28' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 50c0 6.6 13.4 12 30 12s30-5.4 30-12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500;9..144,600;9..144,900&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400;1,6..72,500&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="course.css">
+</head>
+<body>
+
+<div class="masthead">
+  <span><a href="index.html">DATA 2027</a> <span class="dot">●</span> DATA SYSTEMS IN THE AGENTIC ERA</span>
+  <span><a href="index.html">← SCHEDULE</a></span>
+</div>
+
+<header class="page-head">
+  <div class="kicker">Week 05 · Part II — New Access Methods &amp; Engines</div>
+  <h1>Learned <em>Components</em></h1>
+  <p class="standfirst">In 2018 the field declared that indexes are models and models would replace indexes. Eight years later the scoreboard is in: ML inside the engine mostly lost, ML advising the engine quietly won — and the LLM agent outside the engine is the strangest winner of all.</p>
+  <div class="meta"><b>Lectures:</b> Tue — The case for (and against) learned indexes · Thu — Bao: ML steering the optimizer &nbsp;·&nbsp; <b>Lab:</b> Fri — Build an RMI over 200M sorted keys; race it against <code>std::lower_bound</code> and ART</div>
+</header>
+
+<main>
+
+<section class="block">
+  <div class="objectives">
+    <div class="k">Learning objectives — after this week you can…</div>
+    <ul>
+      <li>Explain why a sorted index is an approximation of the data’s CDF, and derive the lookup cost of a recursive model index from its error bound.</li>
+      <li>State precisely where learned indexes win (read-mostly, in-memory, sorted numeric) and lose (strings, updates, cold caches), citing SOSD evidence.</li>
+      <li>Contrast end-to-end learned optimizers (Neo) with steering approaches (Bao) and argue why bounded action spaces made Bao deployable.</li>
+      <li>Trace what survived from the SageDB vision into shipping systems, and explain OtterTune’s failure as a product-shape lesson, not an ML lesson.</li>
+      <li>Articulate the inversion: why the agentic era moved the “learned component” from inside the engine to an LLM client outside it, connected over MCP.</li>
+    </ul>
+  </div>
+</section>
+
+<section class="block">
+  <div class="sec-label">Lecture 1 · Tuesday</div>
+  <h2>The Case For (and Against) Learned Indexes</h2>
+
+  <p class="opener">Start with a thought experiment Kraska, Beutel, Chi, Dean, and Polyzotis open their SIGMOD 2018 paper with: suppose your table holds every integer from 1 to 100M, densely packed in a sorted array. You do not need a B-tree to find key <code>k</code> — its position is <code>k − 1</code>, computable in one subtraction, O(1) time and O(1) space. The B-tree you would have built is doing something embarrassing: spending 25 bytes per key and four cache-missing pointer hops to rediscover a linear function. Real data is never that clean, but the provocation generalizes. Every sorted index answers one question — <em>given a key, what is its position?</em> — and that question is exactly evaluating the data’s empirical cumulative distribution function: <code>pos = F(key) · N</code>. An index <em>is</em> a model of the CDF. The only debate is which model class you use.</p>
+
+  <h3>B-trees were models all along</h3>
+  <p>Read a B-tree through this lens. Each traversal from root to leaf is a piecewise-constant regression: the inner nodes partition the key space, and the leaf tells you “your key lives somewhere in this 4KB page — go scan it.” That final scan is the model’s error bound, fixed by construction at the page size. A B-tree over N keys with fanout f guarantees error ≤ page_size after log<sub>f</sub>(N) lookups. It is a model with a hard worst-case guarantee and zero training cost, which is why it has run the world since 1971. The learned-index bet is that for many real distributions, a learned regressor can hit a <em>smaller</em> error bound with <em>fewer</em> memory accesses than the tree spends on its descent — because evaluating two linear layers costs ~50–100ns of pure arithmetic in registers, while three or four pointer chases through a cold tree cost ~100ns <em>each</em> in DRAM latency. The trade is branchy memory traffic for predictable FLOPs, and on 2018 hardware FLOPs were already nearly free.</p>
+
+  <h3>The recursive model index</h3>
+  <p>A single model over 200M keys is hopeless — a linear regression might miss by millions of positions, and a neural net accurate to ±100 everywhere would be slower than the tree it replaces. Kraska’s fix is the <strong>recursive model index (RMI)</strong>: a fixed-depth hierarchy of models where each stage narrows the problem. Stage 1 is one model (often a small neural net or just a linear fit) that takes the key and predicts not a position but <em>which stage-2 model to ask</em> — effectively learning a coarse partition of the key space. Stage 2 is an array of, say, 100,000 cheap linear models, each responsible for a thin slice of the distribution where the CDF is locally near-linear. Crucially this is <em>not</em> a tree: there are no pointers, no traversal decisions, just two array indexings and two fused multiply-adds. At build time you record, per leaf model, the maximum over- and under-shoot on the actual data: <code>err_min, err_max</code>. Lookup is then: predict <code>p</code>, binary-search the window <code>[p − err_min, p + err_max]</code>. If the leaf’s worst error is 128 positions, that residual search is 7 comparisons inside one or two cache lines. The reported numbers: up to 1.5–3× faster than a tuned B-tree, using 10–100× less memory for the index structure itself. The memory result matters more than the speed result — an RMI over 200M doubles fits in a few megabytes, i.e., in L2.</p>
+
+  <figure>
+    <svg viewBox="0 0 800 360" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="An index as a model of the CDF">
+      <!-- axes -->
+      <path d="M70 310 L70 42" fill="none" stroke="#1d1a15" stroke-width="2.5" stroke-linecap="round"/>
+      <path d="M70 310 L740 310" fill="none" stroke="#1d1a15" stroke-width="2.5" stroke-linecap="round"/>
+      <text x="380" y="345" font-family="monospace" font-size="14" fill="#1d1a15" text-anchor="middle">key</text>
+      <text x="38" y="180" font-family="monospace" font-size="14" fill="#1d1a15" text-anchor="middle" transform="rotate(-90 38 180)">position = F(key)&#183;N</text>
+      <!-- true CDF: wobbly hand-drawn curve -->
+      <path d="M72 306 C 140 300, 180 282, 230 262 C 270 246, 300 240, 340 224 C 400 200, 420 160, 470 138 C 510 121, 570 110, 630 84 C 680 63, 710 56, 736 48"
+            fill="none" stroke="#1d1a15" stroke-width="3" stroke-linecap="round"/>
+      <text x="330" y="186" font-family="monospace" font-size="13" fill="#1d1a15">empirical CDF (the data)</text>
+      <path d="M328 192 C 318 204, 312 212, 308 228" fill="none" stroke="#1d1a15" stroke-width="1.5" stroke-dasharray="3 4"/>
+      <!-- learned piecewise-linear approximation -->
+      <path d="M72 304 L 232 258 L 342 222 L 472 134 L 632 82 L 736 50"
+            fill="none" stroke="#93321b" stroke-width="3" stroke-dasharray="9 6" stroke-linecap="round"/>
+      <text x="478" y="230" font-family="monospace" font-size="13" fill="#93321b">RMI leaf models (piecewise linear)</text>
+      <!-- error band around one segment -->
+      <path d="M342 206 L 472 118 M342 238 L 472 150" fill="none" stroke="#93321b" stroke-width="1.5" stroke-dasharray="2 5"/>
+      <text x="560" y="120" font-family="monospace" font-size="12" fill="#93321b">&#177;err bound &#8594; binary</text>
+      <text x="560" y="136" font-family="monospace" font-size="12" fill="#93321b">search the window</text>
+      <!-- B-tree step function -->
+      <path d="M72 308 L 150 308 L 150 286 L 230 286 L 230 262 L 310 262 L 310 238 L 390 238"
+            fill="none" stroke="#1d1a15" stroke-width="2" opacity="0.55"/>
+      <text x="120" y="270" font-family="monospace" font-size="12" fill="#1d1a15" opacity="0.75">B-tree = step-function model</text>
+      <!-- lookup arrow -->
+      <path d="M472 310 L 472 140" fill="none" stroke="#93321b" stroke-width="1.5" stroke-dasharray="4 4"/>
+      <circle cx="472" cy="134" r="5" fill="#93321b"/>
+      <text x="466" y="328" font-family="monospace" font-size="12" fill="#93321b">k</text>
+    </svg>
+    <figcaption>Fig. 5.1 — Every sorted index approximates the CDF. A B-tree does it as a step function with error fixed at one page; an RMI does it with piecewise-linear leaves plus a recorded worst-case error band. Lookup = two array indexings, two multiply-adds, then a 7-comparison search inside the band.</figcaption>
+  </figure>
+
+  <h3>The update problem, and the two serious fixes</h3>
+  <p>The 2018 paper handled read-only data, and critics pounced: insert one key and every position to its right shifts, invalidating the model and its error bounds. Two designs answered properly. <strong>ALEX</strong> (Microsoft Research, SIGMOD 2020) keeps the RMI shape but stores data in <em>gapped arrays</em> — leaves deliberately left ~30% empty, with inserts placed where the model predicts they belong (“model-based insertion”), so the model stays accurate <em>by construction</em> rather than by retraining. When a leaf’s error or density degrades past a threshold, ALEX splits or retrains just that leaf. Result: up to 4× the throughput of a B+tree on read-heavy mixes while remaining competitive on writes. <strong>PGM-index</strong> (Ferragina &amp; Vinciguerra, VLDB 2020) goes the other way: it abandons learning-as-training entirely and computes the <em>provably minimal</em> piecewise-linear approximation with error ≤ ε using an O(N) streaming convex-hull algorithm, then recurses on the segment endpoints. You get B-tree-style worst-case guarantees — O(log N) lookups, fully dynamic via an LSM-like scheme — with a structure typically 10–100× smaller than the equivalent tree. The PGM is the version of this idea you can put in a textbook: no gradient descent, no hyperparameters, a theorem instead of a benchmark.</p>
+
+  <h3>SOSD: the honest scoreboard</h3>
+  <p>The field then did something admirable: it built a neutral benchmark and let the idea be falsified. <strong>SOSD</strong> (Marcus, Kipf, van Renen et al., VLDB 2020) raced RMI, PGM, RadixSpline against tuned B-trees, ART, FAST, and plain interpolation search on 200M-key datasets — real ones (OSM cell IDs, Facebook user IDs, Amazon book popularity) and synthetic ones. The verdict is worth memorizing because it is the template for every honest ML-for-systems evaluation since. Learned structures genuinely win — often by 1.5–2× on lookup latency at a fraction of the space — but only inside a specific box: <strong>read-mostly, in-memory, sorted, numeric keys</strong>. Step outside any wall of that box and the win evaporates. Strings? The model needs an embedding and the comparison cost dominates anyway. Heavy updates? You pay ALEX’s gap maintenance or PGM’s merge amortization, and a B-tree’s boring predictability looks good again. Data on disk? One I/O is 100µs; saving 200ns of search inside the page is rounding error — the B-tree’s fanout already minimized I/Os, which was always its actual job. The 2018 paper’s implicit claim was “this replaces B-trees”; the 2020 evidence says “this is a better <em>node layout</em> for a specific, large, but bounded regime.” Both things can be true. Notably, Google reported learned-index techniques in production inside Bigtable’s SSTable block indexes — exactly the read-only, sorted, in-memory regime SOSD identified.</p>
+
+  <div class="aside">
+    <span class="k">Field note</span>
+    The loudest early objection wasn’t technical. “The case for learned index structures” has Jeff Dean on the author list, and half the community read it as Google announcing that systems people would be replaced by TensorFlow. The lasting contribution turned out to be almost the opposite of the hype: a <em>framing</em> (indexes are CDF models) that let non-ML people like Ferragina build the PGM-index with no machine learning whatsoever. The best outcome of an ML-for-systems paper was a new piece of classical algorithmics.
+  </div>
+</section>
+
+<section class="block">
+  <div class="sec-label">Lecture 2 · Thursday</div>
+  <h2>Bao: ML Steering the Optimizer</h2>
+
+  <p class="opener">Query optimization should have been the killer app for learned components, because the classical solution is built on estimates everyone knows are fiction. Leis et al.’s “How Good Are Query Optimizers, Really?” (VLDB 2015) measured it: on the Join Order Benchmark, PostgreSQL’s cardinality estimates for multi-join queries were off by factors of 10⁴ to 10⁸ — not percent, <em>orders of magnitude</em> — because the independence and uniformity assumptions behind per-column histograms collapse under correlated predicates. (Movies produced in Germany really are more likely to have German-language titles.) Cost models are quadratic refinements of garbage inputs. So researchers reached for ML twice: first to fix the estimates, then to replace the optimizer wholesale. Both attacks taught us more about deployment than about ML.</p>
+
+  <h3>Learned cardinalities: better numbers, same fragility</h3>
+  <p>Learned cardinality estimators — MSCN’s supervised set-convolutions over query features (Kipf et al., CIDR 2019), DeepDB’s sum-product networks over the data itself, NeuroCard’s join-aware autoregressive models — cut median q-error from hundreds down to single digits in lab settings. And yet none of them ship in a major engine’s hot path. Three reasons recur. <strong>Tail risk:</strong> a median-better estimator that occasionally hallucinates a 10⁶× error produces one catastrophic plan a day, and a database that is fast on average but unpredictable is a database users abandon. <strong>Drift:</strong> the model is trained against yesterday’s data and yesterday’s workload; after a bulk load or a schema migration its errors are silently stale, while a histogram is at least <em>cheaply</em> rebuildable by <code>ANALYZE</code>. <strong>Inference cost in the wrong place:</strong> optimization happens per-query on the latency path; nobody wants a 5ms neural-net call to plan a 2ms query. Keep this failure triangle — tails, drift, inference placement — on the board; Bao is engineered point-by-point against it.</p>
+
+  <h3>Neo versus Bao: replace the optimizer, or steer it?</h3>
+  <p>Marcus and the MIT group tried both ends of the spectrum, which makes the pair a perfect controlled experiment in research strategy. <strong>Neo</strong> (VLDB 2019) is the maximalist: an end-to-end learned optimizer that builds join orders bottom-up with a tree-convolution value network guiding best-first search, bootstrapped from PostgreSQL’s plans and then improving past them. It worked — after about a day of training it matched or beat commercial optimizers on its training workload. It also exhibited every deployment pathology at once: cold start on a new schema (it knows nothing until it has watched thousands of queries), brittleness under drift, an unbounded action space in which a bad network can emit an arbitrarily terrible plan, and zero explainability when it does.</p>
+  <p><strong>Bao</strong> (SIGMOD 2021, ACM SIGMOD Best Paper) is the same group’s deliberate retreat to a defensible position, and it is the most important design move in this whole literature. Bao does not generate plans. PostgreSQL already exposes coarse planner switches — <code>enable_hashjoin</code>, <code>enable_nestloop</code>, <code>enable_indexscan</code>, and friends. A subset of those switches is a <em>hint set</em>; Bao fixes a menu of 48 of them. For each incoming query it asks the classical optimizer to plan the query under each hint set, feeds each resulting plan tree (operators + cardinality estimates as features) through a tree-convolutional value model predicting latency, and executes the predicted-best plan. Exploration is handled as a contextual multi-armed bandit with Thompson sampling — Bao deliberately occasionally picks a non-greedy arm, observes the true latency, and retrains; the regret framework gives it a principled answer to “how much do we pay to keep learning?” Look at how each leg of the failure triangle is amputated. Tail risk: every arm is a plan a real optimizer produced, so the worst case is a <em>valid, costed, classical</em> plan — the floor is “PostgreSQL on an off day,” not chaos. Cold start: the default arm (empty hint set) <em>is</em> PostgreSQL, so day-one behavior is the status quo. Drift: a 48-way choice retrains in minutes on one GPU, and the paper shows it adapting to workload and schema shifts in hours, cutting tail (p99) latencies substantially on real workloads and reducing cost on cloud instances. Bao shipped in spirit: Microsoft’s “Auto-Steer” for SQL Server and follow-on systems at Meta and elsewhere are recognizably Bao-shaped.</p>
+
+  <table>
+    <thead>
+      <tr><th>System</th><th>Where the ML sits</th><th>Action space</th><th>Worst case</th><th>Fate</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><b>Neo</b> (VLDB ’19)</td><td>Replaces the optimizer</td><td>All possible plans</td><td>Arbitrarily bad plan, unexplainable</td><td>Influential; never deployed as-is</td></tr>
+      <tr><td><b>Bao</b> (SIGMOD ’21)</td><td>Advises the optimizer (picks 1 of 48 hint sets)</td><td>48 classical plans</td><td>A valid plan from a real optimizer</td><td>Pattern adopted (MSFT Auto-Steer &amp; kin)</td></tr>
+      <tr><td><b>OtterTune</b> (’17–’23)</td><td>Outside the engine, tuning knobs</td><td>~10–200 config knobs</td><td>Bad config (recoverable restart)</td><td>Good tech, dead company (2023)</td></tr>
+      <tr><td><b>LLM-DBA via MCP</b> (now)</td><td>Outside the engine, as a <em>client</em></td><td>SQL, EXPLAIN, DDL, knobs — anything a human DBA can type</td><td>Whatever you let it execute</td><td>The current frontier — and Week 12’s safety problem</td></tr>
+    </tbody>
+  </table>
+
+  <div class="pull">The systems that shipped all share one clause in their contract: <b>the model advises, the engine decides.</b></div>
+
+  <h3>SageDB’s vision, and the parts that actually shipped</h3>
+  <p>SageDB (Kraska et al., CIDR 2019) is the maximalist manifesto: a database where <em>every</em> component — index, sort, join, scheduler, optimizer, storage layout — is synthesized from a learned model of the data and workload, the “instance-optimal” system. As a research agenda it was generative; as a system it never arrived in that form. What shipped is instructive precisely because of <em>which</em> pieces made it. Amazon Redshift — staffed by several SageDB authors — ships learned components today, but all in advisory, off-critical-path roles: ML-driven automatic table optimization picks sort keys and distribution styles by watching the workload; automatic workload management uses a model to predict query memory and runtime to schedule admission; short-query acceleration is a learned classifier deciding which queue a query enters. Notice the pattern — every one of these is a <em>policy decision feeding a classical mechanism</em>, made asynchronously, where a wrong answer degrades performance but never correctness. The learned sort and the learned join from the manifesto, the parts that touch query results? Nowhere in production. The physics separation you should carry out of this course: ML is excellent at <em>policies</em> (what to do, given this workload) and dangerous at <em>mechanisms</em> (how to do it correctly under all inputs).</p>
+
+  <h3>OtterTune: the cautionary product tale</h3>
+  <p>OtterTune began as Carnegie Mellon research (Van Aken, Pavlo et al., SIGMOD 2017): use Gaussian-process Bayesian optimization over telemetry to tune the hundreds of configuration knobs in PostgreSQL/MySQL — <code>shared_buffers</code>, <code>work_mem</code>, checkpoint cadence — a task human DBAs do badly and rarely. The research was sound and the company (founded 2020) raised real money, yet it shut down in mid-2023, with Pavlo delivering the unsparing postmortem himself. The autopsy matters for this course. First, <strong>knob tuning is bounded-upside</strong>: a great config buys you maybe 20–50% on a workload, once — then the value is captured and the subscription looks expensive. Second, <strong>the cloud vendors absorbed the feature</strong>: if Aurora and Azure auto-tune for free, a third-party tuner is selling against a bundled default. Third, and most relevant to us: customers didn’t actually want an autonomous closed loop touching production — they wanted a <em>recommendation with an explanation</em> they could review. OtterTune died selling automation to people who wanted advice. Hold that thought for thirty seconds.</p>
+
+  <h3>The inversion: the DBA model moved outside the engine</h3>
+  <p>Now place this week inside the course thesis. A decade of “ML for systems” fought to push models <em>into</em> the engine — into the index, the estimator, the tuner — and the survivors were the ones that stayed advisory and bounded. The agentic era inverts the geometry entirely. The most capable learned component in your 2026 database deployment is not in the engine at all: it is an LLM connected as a <em>client</em> over MCP, holding <code>EXPLAIN ANALYZE</code> output, <code>pg_stat_statements</code>, and the schema in its context window, proposing indexes and rewrites in natural language. It is, structurally, exactly what OtterTune’s customers were asking for — a tireless advisor that explains itself — built from a general model instead of a bespoke one, and crucially it inherits Bao’s safety contract for free <em>if you design the tool surface correctly</em>: the agent advises, a human or a guarded executor decides. This inversion changes what engines must optimize for. The internal-ML decade asked engines for training hooks; the agentic decade asks them for <strong>observability and safe control surfaces</strong> — rich EXPLAIN output, queryable statistics, dry-run DDL, permissioned hint interfaces. The engine’s job is no longer to learn; it is to be <em>legible to something that does</em>. Workloads changed; the physics — bounded action spaces, classical floors under learned policies — did not.</p>
+
+  <div class="aside">
+    <span class="k">Historical aside</span>
+    Self-tuning databases are not a 2018 idea. Microsoft’s AutoAdmin project shipped the Index Tuning Wizard in SQL Server 7.0 — in <em>1998</em> — and IBM ran SMART/LEO (a learning optimizer that corrected its own cardinality estimates from runtime feedback) at the turn of the millennium. LEO was Bao’s feedback loop, twenty years early, and it was quietly turned off in DB2 because customers feared plan instability more than they valued plan improvement. Every generation rediscovers that the binding constraint is operator trust, not model accuracy.
+  </div>
+</section>
+
+<section class="block">
+  <div class="sec-label">Readings</div>
+  <h2>Read Before Thursday</h2>
+  <div class="reads-block">
+    <div class="read-row"><div class="n">1</div><div class="t"><i>The Case for Learned Index Structures</i> — Kraska, Beutel, Chi, Dean, Polyzotis, SIGMOD 2018.<span class="v">Read §1–3 closely for the CDF framing and the RMI; treat the eval skeptically and bring one benchmark objection (the SOSD authors found several).</span></div></div>
+    <div class="read-row"><div class="n">2</div><div class="t"><i>Bao: Making Learned Query Optimization Practical</i> — Marcus, Negi, Mao, Tatbul, Alizadeh, Kraska, SIGMOD 2021.<span class="v">Focus on §2’s design constraints and the Thompson-sampling loop — note how every choice traces back to a specific deployment failure of Neo.</span></div></div>
+    <div class="read-row"><div class="n">3</div><div class="t"><i>SageDB: A Learned Database System</i> — Kraska, Alizadeh, Beutel, Chi, Ding, Kristo, Leclerc, Madden, Mao, Nathan, CIDR 2019.<span class="v">Read as a manifesto, not a system paper; as you read, mark each proposed component as policy or mechanism, and check your marks against what Redshift shipped.</span></div></div>
+  </div>
+</section>
+
+<section class="block">
+  <div class="sec-label">Exercises</div>
+  <h2>This Week’s Problems</h2>
+  <div class="exercise">
+    <div class="ex-head">Exercise 5.1 · warm-up</div>
+    <div class="ex-body"><p>You build a two-stage RMI over N = 200M sorted 64-bit keys: one stage-1 linear model and 100,000 stage-2 linear models, each storing its own <code>(err_min, err_max)</code>. (a) Compute the index’s total memory footprint, assuming each linear model is two doubles plus two 32-bit error bounds, and compare against a B+tree with 16-byte entries and fanout 256 over the same keys (count inner nodes only). (b) If the worst leaf error is 512 positions, how many key comparisons does the residual binary search cost, and how many cache lines (64B, 8B keys) can it touch? (c) State the dataset property that would blow up the error bound of a <em>linear</em> stage-2 model, and name which fix — ALEX or PGM — addresses it without changing the model class.</p></div>
+  </div>
+  <div class="exercise">
+    <div class="ex-head">Exercise 5.2 · core</div>
+    <div class="ex-body"><p>Reproduce a miniature Bao. On PostgreSQL with the Join Order Benchmark (or TPC-H SF1 if your laptop protests), define four hint sets: {} (default), {<code>enable_nestloop=off</code>}, {<code>enable_hashjoin=off</code>}, {<code>enable_nestloop=off, enable_mergejoin=off</code>}. For 20 queries, run <code>EXPLAIN ANALYZE</code> under each arm and record true latencies. (a) Report the regret of always choosing the default arm versus the per-query oracle — how much was on the table? (b) Featurize each plan (operator counts, total estimated cost, estimated rows) and fit any regressor you like to predict latency; report how often your model picks the oracle arm on held-out queries. (c) Identify one query where the default optimizer’s choice was wrong by &gt;2× and explain, from the plan, <em>which cardinality estimate</em> misled it.</p></div>
+  </div>
+  <div class="exercise">
+    <div class="ex-head">Exercise 5.3 · stretch</div>
+    <div class="ex-body"><p>Design the Bao contract for an LLM-DBA. Specify an MCP tool surface for an agent that tunes a production PostgreSQL instance, such that the agent’s <em>worst case</em> is provably bounded the way Bao’s was. Your design must answer: (a) which capabilities are read-only, which are dry-run (e.g., hypothetical indexes via <code>hypopg</code>), and which mutate — and what guards each mutation (cost ceilings, canary windows, automatic rollback triggers expressed over which metrics)? (b) What is the formal analogue of Bao’s “every arm is a classical plan” floor when the action space is free-form SQL DDL — can you define one, or must you restrict the action space to a menu? Argue precisely. (c) Bao explored via Thompson sampling against a latency posterior; what is the legitimate exploration mechanism for an agent on a <em>production</em> system where exploration has customer-visible cost — shadow replicas, traffic mirroring, off-peak budgets? Propose one, estimate its dollar cost on a cloud instance, and identify the failure mode it cannot catch. There is no canonical answer; we will tear three of these apart in Friday’s lab.</p></div>
+  </div>
+  <div class="fleuron">❦</div>
+</section>
+
+<nav class="pager">
+  <a href="week-04.html"><span class="dir">← Week 04</span><span class="ttl">Disaggregation &amp; Elasticity</span></a>
+  <a class="next" href="week-06.html"><span class="dir">Week 06 →</span><span class="ttl">Vector Indexes Are Access Methods, Not Products</span></a>
+</nav>
+
+</main>
+
+<footer class="site">
+  <div class="inner">
+    <span>DATA 2027 — a course that doesn’t exist yet · <a href="../index.html">Essay № 01</a> · <a href="../course.html">Essay № 02</a></span>
+    <span>CC BY 4.0 · built with <a href="https://claude.com/claude-code">Claude Code</a></span>
+  </div>
+</footer>
+
+</body>
+</html>

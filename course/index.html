@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DATA 2027: Data Systems in the Agentic Era — Course Home</title>
+<meta name="description" content="A complete, free graduate database course for the agentic era: 14 weeks of lecture notes, 4 systems labs, final projects, and a synthesis exam. The course MIT, Stanford, and Harvard don't teach yet.">
+<meta property="og:title" content="DATA 2027: Data Systems in the Agentic Era">
+<meta property="og:description" content="14 weeks of lecture notes · 4 systems labs · 8 final projects · a synthesis exam. Free, open, CC BY.">
+<meta name="theme-color" content="#f6f1e7">
+<link rel="canonical" href="https://zozo123.github.io/databases-in-the-ai-era/course/">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23f6f1e7'/%3E%3Cellipse cx='50' cy='28' rx='30' ry='12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 28v44c0 6.6 13.4 12 30 12s30-5.4 30-12V28' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 50c0 6.6 13.4 12 30 12s30-5.4 30-12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500;9..144,600;9..144,900&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400;1,6..72,500&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="course.css">
+<style>
+  /* hub-specific */
+  .sched { border-top: 2px solid var(--ink); margin: 10px 0 30px; }
+  .sched-row {
+    display: grid; grid-template-columns: 58px 86px 1fr 130px; gap: 18px;
+    padding: 15px 4px; border-bottom: 1px solid var(--rule); align-items: baseline;
+    text-decoration: none; border-bottom-style: solid; transition: background .12s;
+  }
+  a.sched-row { border-bottom: 1px solid var(--rule); }
+  .sched-row:hover { background: var(--paper-deep); color: inherit; }
+  .sched-row .wk { font-family: var(--display); font-weight: 900; font-size: 21px; color: var(--ox); }
+  .sched-row .dt { font-family: var(--mono); font-size: 11.5px; color: var(--ink-faint); padding-top: 4px; }
+  .sched-row .tt { font-family: var(--display); font-weight: 600; font-size: 19px; line-height: 1.25; }
+  .sched-row .tt span { display: block; font-family: var(--serif); font-weight: 400; font-size: 14.5px; color: var(--ink-soft); margin-top: 3px; }
+  .sched-row .tag { font-family: var(--mono); font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--ox); text-align: right; padding-top: 4px; }
+  .part-bar {
+    font-family: var(--mono); font-size: 11px; letter-spacing: .2em; text-transform: uppercase;
+    color: var(--paper); background: var(--ink); padding: 9px 16px; margin-top: 18px;
+  }
+  .break-row { display: block; padding: 10px 4px; border-bottom: 1px dashed var(--rule); font-family: var(--mono); font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--ink-faint); text-align: center; }
+  .lab-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin: 10px 0 24px; }
+  .lab-card { border: 1px solid var(--ink); background: var(--paper-deep); padding: 22px 22px 20px; text-decoration: none; transition: background .12s; display: block; }
+  .lab-card:hover { background: var(--paper); color: inherit; }
+  .lab-card .ln { font-family: var(--mono); font-size: 10.5px; letter-spacing: .16em; text-transform: uppercase; color: var(--ox); margin-bottom: 8px; }
+  .lab-card h4 { margin: 0 0 6px; font-size: 19px; }
+  .lab-card p { font-size: 14.5px; color: var(--ink-soft); margin: 0; line-height: 1.55; }
+  .gb { display: flex; height: 60px; border: 1px solid var(--ink); font-family: var(--mono); margin: 14px 0 30px; }
+  .gb div { display: flex; flex-direction: column; justify-content: center; padding: 0 13px; font-size: 10.5px; letter-spacing: .04em; border-right: 1px solid var(--paper); overflow: hidden; white-space: nowrap; }
+  .gb div b { font-size: 17px; }
+  .gb .g1 { width: 40%; background: var(--ink); color: var(--paper); }
+  .gb .g2 { width: 35%; background: var(--ox); color: var(--paper); }
+  .gb .g3 { width: 15%; background: var(--ox-bright); color: var(--paper); }
+  .gb .g4 { width: 10%; background: var(--paper-deep); color: var(--ink); }
+</style>
+</head>
+<body>
+
+<div class="masthead">
+  <span>DATA 2027 <span class="dot">●</span> SPRING 2027 · A COURSE THAT DOESN’T EXIST YET</span>
+  <span><a href="../course.html">← THE SYLLABUS ESSAY</a> &nbsp;·&nbsp; <a href="../index.html">THE ESSAY</a></span>
+</div>
+
+<header class="page-head">
+  <div class="kicker">MIT 6.5837 · Stanford CS 345A · Harvard CS 2650</div>
+  <h1>Data Systems in the <em>Agentic</em> Era</h1>
+  <p class="standfirst">A complete graduate database course for CS students — 14 weeks of full lecture notes, four systems labs, eight final projects, and a synthesis exam. Free, open, and built on one thesis: <strong>the database’s dominant client is now a model, and that changes the workload at every layer of the stack — but not the physics.</strong></p>
+  <div class="meta">
+    <b>Units:</b> 12 (3-0-9) &nbsp;·&nbsp; <b>Meets:</b> Tu/Th 1:00–2:30 + Fri lab &nbsp;·&nbsp; <b>Prereqs:</b> undergrad DB internals, systems programming (Rust/C++/Go), LLM API fluency<br>
+    <b>Everything on this site is real coursework; only the registrar entry is fictional.</b> Steal freely — CC BY 4.0.
+  </div>
+</header>
+
+<main>
+
+<section class="block" id="about">
+  <div class="sec-label">About</div>
+  <h2>Why this course exists</h2>
+  <p class="opener">For fifty years, every database design decision — the buffer pool, the optimizer’s cost model, the isolation-level menu, SQL itself — quietly assumed a human at the other end of the connection. That client is gone. The dominant client of the late 2020s issues thousands of speculative queries per task, branches and abandons entire database states, retrieves by similarity as often as by key, and lies confidently when the data model confuses it. Database courses teach the system; ML courses teach the model; nobody teaches the interface between them, which is where the next decade of both fields will be decided.</p>
+  <p>This course rebuilds database systems knowledge from storage engines upward, asking at each layer what survives, what bends, and what breaks when the client is a model. Part I re-reads the classical canon as a set of workload bets about to be violated. Part II covers the new access methods and engine architectures. Part III climbs to where accuracy actually lives — semantics, agents, governance. Part IV asks the field’s oldest question of its newest material.</p>
+  <p><strong>LLM policy:</strong> frontier models are allowed — encouraged — everywhere, including the exam. You are training to build systems <em>for</em> these clients; pretending they don’t exist teaches the wrong lesson. What is graded is what models can’t fake: Pareto frontiers from your own benchmarks, ablation tables, and designs you can defend in a hallway argument.</p>
+</section>
+
+<section class="block" id="schedule">
+  <div class="sec-label">Schedule</div>
+  <h2>Fourteen weeks</h2>
+
+  <div class="sched">
+    <div class="part-bar">Part I — Foundations Under New Workloads</div>
+    <a class="sched-row" href="week-01.html"><span class="wk">01</span><span class="dt">Feb 2 / 4</span><span class="tt">The Client Has Changed<span>Anatomy of a DBMS · the agentic workload, measured</span></span><span class="tag">notes →</span></a>
+    <a class="sched-row" href="week-02.html"><span class="wk">02</span><span class="dt">Feb 9 / 11</span><span class="tt">B-Trees, LSM-Trees &amp; the RUM Triangle<span>The disk made me do it · amplification arithmetic</span></span><span class="tag">notes →</span></a>
+    <a class="sched-row" href="week-03.html"><span class="wk">03</span><span class="dt">Feb 16 / 18</span><span class="tt">One Size Fits None<span>Column stores · vectorized execution</span></span><span class="tag">notes →</span></a>
+    <a class="sched-row" href="week-04.html"><span class="wk">04</span><span class="dt">Feb 23 / 25</span><span class="tt">Disaggregation &amp; Elasticity<span>Aurora · Snowflake · Neon’s branchable storage</span></span><span class="tag">notes →</span></a>
+
+    <div class="part-bar">Part II — New Access Methods &amp; Engines</div>
+    <a class="sched-row" href="week-05.html"><span class="wk">05</span><span class="dt">Mar 2 / 4</span><span class="tt">Learned Components<span>Learned indexes · Bao · the deployable pattern</span></span><span class="tag">notes →</span></a>
+    <a class="sched-row" href="week-06.html"><span class="wk">06</span><span class="dt">Mar 9 / 11</span><span class="tt">Vector Indexes Are Access Methods, Not Products<span>IVF · PQ · HNSW · DiskANN · the recall axis</span></span><span class="tag">notes →</span></a>
+    <a class="sched-row" href="week-07.html"><span class="wk">07</span><span class="dt">Mar 16 / 18</span><span class="tt">The Lakehouse &amp; Open Formats<span>Iceberg’s metadata tree · Photon · the catalog wars</span></span><span class="tag">notes →</span></a>
+    <span class="break-row">— spring break · week of Mar 22 —</span>
+    <a class="sched-row" href="week-08.html"><span class="wk">08</span><span class="dt">Mar 30 / Apr 1</span><span class="tt">Transactions &amp; Branching for Agent Swarms<span>Calvin vs Spanner · copy-on-write as product</span></span><span class="tag">notes →</span></a>
+
+    <div class="part-bar">Part III — Semantics, Agents, Governance</div>
+    <a class="sched-row" href="week-09.html"><span class="wk">09</span><span class="dt">Apr 6 / 8</span><span class="tt">Text-to-SQL Is Not Solved; It’s Specified<span>Spider 2.0 · the semantic layer as schema-for-models</span></span><span class="tag">notes →</span></a>
+    <a class="sched-row" href="week-10.html"><span class="wk">10</span><span class="dt">Apr 13 / 15</span><span class="tt">Semantic Operators<span>sem_filter, sem_join · optimizing pipelines that cost dollars and lie</span></span><span class="tag">notes →</span></a>
+    <a class="sched-row" href="week-11.html"><span class="wk">11</span><span class="dt">Apr 20 / 22</span><span class="tt">Memory Is a Database Problem<span>Mem0, Graphiti, MemGPT — graded as database designs</span></span><span class="tag">notes →</span></a>
+    <a class="sched-row" href="week-12.html"><span class="wk">12</span><span class="dt">Apr 27 / 29</span><span class="tt">Protocols, Permissions &amp; the Lethal Trifecta<span>MCP as ODBC for agents · securing DBs against hypnotizable clients</span></span><span class="tag">notes →</span></a>
+
+    <div class="part-bar">Part IV — Frontier &amp; Futures</div>
+    <a class="sched-row" href="week-13.html"><span class="wk">13</span><span class="dt">May 4 / 6</span><span class="tt">Self-Driving, Self-Assembling, Self-Designing<span>Auto-tuning to self-design · the agent as DBA</span></span><span class="tag">notes →</span></a>
+    <a class="sched-row" href="week-14.html"><span class="wk">14</span><span class="dt">May 11 / 13</span><span class="tt">What Goes Around<span>Fifty years of rebellions · final debate: the first genuine exception?</span></span><span class="tag">notes →</span></a>
+  </div>
+</section>
+
+<section class="block" id="labs">
+  <div class="sec-label">Labs</div>
+  <h2>Four labs, each a thesis in miniature</h2>
+  <p>Graded on Pareto frontiers and ablation tables, not point estimates — the validation discipline of production analytics agents, enforced from problem set one.</p>
+  <div class="lab-grid">
+    <a class="lab-card" href="lab-1.html"><div class="ln">Lab 1 · Weeks 2–4 · Rust</div><h4>VLSM: an LSM-tree with vector segments</h4><p>SSTables carry quantized vector segments with per-level HNSW graphs; compaction merges graphs. Deliverable: a read/update/memory/recall Pareto plot.</p></a>
+    <a class="lab-card" href="lab-2.html"><div class="ln">Lab 2 · Weeks 5–8 · any language</div><h4>Mini-Neon: copy-on-write pages over S3</h4><p>WAL ingestion, GetPage@LSN, CREATE BRANCH in O(metadata). Demo: 50 concurrent agent branches plus garbage collection of the abandoned ones.</p></a>
+    <a class="lab-card" href="lab-3.html"><div class="ln">Lab 3 · Weeks 9–10 · Python</div><h4>Text-to-SQL agent + eval harness</h4><p>An agent over a 200-table schema full of deliberate traps; build the eval set, add a semantic layer, and reproduce the 21%→95% curve in miniature.</p></a>
+    <a class="lab-card" href="lab-4.html"><div class="ln">Lab 4 · Weeks 10–12 · Python</div><h4>A semantic-operator optimizer</h4><p>sem_filter / sem_join / sem_topk with model-tier cost models and proxy cascades. Beat the naive plan by 10× on cost at ≤2% quality loss.</p></a>
+  </div>
+</section>
+
+<section class="block" id="grading">
+  <div class="sec-label">Assessment</div>
+  <h2>Grading, projects, exam</h2>
+  <div class="gb">
+    <div class="g1"><b>40%</b>labs</div>
+    <div class="g2"><b>35%</b>final project</div>
+    <div class="g3"><b>15%</b>papers + debate</div>
+    <div class="g4"><b>10%</b>exam</div>
+  </div>
+  <p>The final project is a team-of-two, CIDR-format paper plus working artifact, chosen from <a href="../course.html#projects">a menu of eight publishable questions</a> — from recall-aware compaction to the agent-native TPC benchmark. The take-home synthesis exam is open-everything, including frontier models; its <a href="../course.html#exam">five questions</a> each require holding two layers of the stack in tension. The famous ones: <em>RUM-R</em> (formalize recall as the fourth axis of the RUM conjecture) and <em>Isolation for liars</em> (define an isolation level for agents acting on stale memory summaries).</p>
+  <div class="fleuron">❦</div>
+</section>
+
+</main>
+
+<footer class="site">
+  <div class="inner">
+    <span>DATA 2027 · companion to <a href="../index.html">Essay № 01: Databases in the Age of AI</a> and <a href="../course.html">Essay № 02: The 2027 Syllabus</a></span>
+    <span>CC BY 4.0 · built with <a href="https://claude.com/claude-code">Claude Code</a></span>
+  </div>
+</footer>
+
+</body>
+</html>

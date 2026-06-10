@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Week 8: Transactions &amp; Branching for Agent Swarms — DATA 2027</title>
+<meta name="description" content="Calvin vs Spanner at the poles of distributed transactions, and copy-on-write branching as the safe write path for thousands of speculative agents.">
+<meta name="theme-color" content="#f6f1e7">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23f6f1e7'/%3E%3Cellipse cx='50' cy='28' rx='30' ry='12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 28v44c0 6.6 13.4 12 30 12s30-5.4 30-12V28' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 50c0 6.6 13.4 12 30 12s30-5.4 30-12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500;9..144,600;9..144,900&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400;1,6..72,500&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="course.css">
+</head>
+<body>
+
+<div class="masthead">
+  <span><a href="index.html">DATA 2027</a> <span class="dot">●</span> DATA SYSTEMS IN THE AGENTIC ERA</span>
+  <span><a href="index.html">← SCHEDULE</a></span>
+</div>
+
+<header class="page-head">
+  <div class="kicker">Week 08 · Part II — New Access Methods &amp; Engines</div>
+  <h1>Transactions &amp; Branching for Agent <em>Swarms</em></h1>
+  <p class="standfirst">When ten thousand agents want to try something before they mean it, the transaction abstraction stretches in two directions at once: stricter global ordering underneath, and cheap speculative universes on top. This week we study both ends.</p>
+  <div class="meta"><b>Lectures:</b> Tue — Distributed transactions: Calvin vs Spanner · Thu — Copy-on-write branching as product &nbsp;·&nbsp; <b>Lab:</b> Fri — Create, diverge, and garbage-collect 500 Neon branches; measure storage and branch-creation latency</div>
+</header>
+
+<main>
+
+<section class="block">
+  <div class="objectives">
+    <div class="k">Learning objectives — after this week you can…</div>
+    <ul>
+      <li>State precisely what serializability and external consistency promise, and which one Calvin and Spanner each deliver.</li>
+      <li>Explain why deterministic pre-ordering eliminates two-phase commit — and why the same move eliminates interactive transactions.</li>
+      <li>Compute the commit-wait cost of TrueTime from a clock-uncertainty bound ε, and argue when that cost is worth paying.</li>
+      <li>Do the page-sharing arithmetic for copy-on-write branches: creation cost, marginal storage per branch, and GC pressure under a given branch birth/death rate.</li>
+      <li>Design a branch–validate–merge write path for an agent swarm and identify the anomalies it does and doesn’t prevent.</li>
+    </ul>
+  </div>
+</section>
+
+<section class="block">
+  <div class="sec-label">Lecture 1 · Tuesday</div>
+  <h2>Distributed Transactions: Calvin vs Spanner</h2>
+  <p class="opener">Agents are greedy transactional clients. A human clicks “checkout” once; an agent fleet retries, forks, races itself, and issues correlated writes from fifty workers that all read the same stale plan. If your isolation story is “read committed and hope,” a swarm will find the anomaly within the hour — we saw the lost-update demo in Week 2. So today we go to the two most instructive poles of distributed transaction design, both published in 2012, both still defining the trade space: Calvin, which says <em>agree on the order first and execution becomes embarrassingly simple</em>, and Spanner, which says <em>buy better clocks and the order falls out of physics</em>. Everything shipping today — CockroachDB, Yugabyte, FoundationDB, TiDB — is a point on the line between them.</p>
+
+    <h3>Sixty seconds of serializability</h3>
+    <p>One paragraph of refresher, because the rest of the lecture leans on it. A schedule of concurrently executing transactions is <strong>serializable</strong> if its effects equal those of <em>some</em> serial execution of the same transactions — note the existential quantifier: the system may pick any order it likes. <strong>Strict serializability</strong> (Spanner calls it <em>external consistency</em>) adds a real-time constraint: if transaction T₁ commits before T₂ <em>begins</em>, in wall-clock time observable from outside the system, then the chosen serial order must put T₁ before T₂. The gap matters for agents: a serializable-but-not-strict system may let an agent commit a write, tell its sibling about it over HTTP, and have the sibling’s subsequent read <em>not see it</em> — perfectly legal, because the equivalent serial order put the sibling first. Out-of-band communication between agents is the norm, not the exception, which is why external consistency stopped being an academic nicety around 2024.</p>
+
+    <h3>Calvin: order first, execute later</h3>
+    <p>Calvin (Thomson et&nbsp;al., SIGMOD 2012) makes one observation and follows it off a cliff: <em>if every replica of every partition agrees on the full input sequence of transactions before executing any of them, then no agreement is needed afterward.</em> A sequencing layer batches incoming transaction requests into epochs (10&nbsp;ms in the paper), replicates each batch via Paxos, and hands every partition the same global log. A deterministic lock manager then grants locks <em>in log order</em> — no deadlock is possible, because lock acquisition order is a total order — and workers execute. A node that crashes mid-epoch doesn’t trigger an abort vote; it just replays the log, and determinism guarantees it converges to the same state. There is <strong>no two-phase commit, no commit protocol at all</strong> for multi-partition transactions. Throughput on TPC-C-like workloads scaled to 500,000 txns/sec on 100 commodity machines in 2012, when Spanner-style designs were paying cross-datacenter round trips per commit.</p>
+    <p>The price is steep and structural: Calvin must know each transaction’s <strong>read and write sets before sequencing it</strong>. That means no interactive transactions — no <code>BEGIN</code>, read something, think, decide what to write, <code>COMMIT</code>. Your transaction is a stored procedure, submitted whole. For transactions whose write set depends on a read (“delete the order with the lowest score”), Calvin runs a reconnaissance query at low cost first, then submits the real transaction with the discovered keys, re-checking at execution that the recon results still hold — Optimistic Lock Location Prediction. It works, but every dependent transaction now makes two trips, and a hot key can make recon perpetually stale. Note the irony for our course: an LLM agent’s “transaction” is the most interactive workload imaginable — read, think for nine seconds, write — and yet the agent’s <em>final</em> intent, once it stops thinking, is usually a perfectly declarable read/write set. Hold that thought until Thursday.</p>
+
+    <h3>Spanner: trust the clocks, pay the wait</h3>
+    <p>Spanner (Corbett et&nbsp;al., OSDI 2012) keeps interactive transactions — two-phase locking, with 2PC across shards coordinated over Paxos groups so the coordinator itself can’t be a single point of failure — and solves ordering with hardware. <strong>TrueTime</strong> exposes time as an interval: <code>TT.now()</code> returns [earliest, latest], with the guarantee that absolute time lies inside. GPS receivers and atomic clocks in every datacenter keep the uncertainty ε small: the paper reports ε typically 1–7&nbsp;ms, averaging around 4&nbsp;ms. The trick is <strong>commit wait</strong>: a transaction is assigned timestamp <em>s</em> = TT.now().latest at commit, then the coordinator blocks until TT.after(<em>s</em>) is true — i.e., until every clock in the fleet agrees that <em>s</em> is in the past — before releasing locks and acknowledging. Expected stall: about 2ε, call it 5–10&nbsp;ms. After that wait, timestamp order <em>is</em> real-time order, and external consistency holds globally, across continents, with no communication between non-overlapping transactions.</p>
+    <p>So Spanner pays in latency-per-commit what Calvin pays in programming-model flexibility. And Spanner still runs 2PC: a multi-shard commit costs prepare and commit rounds across Paxos groups, each a replication round trip. Cross-region read-write transactions land in the 10–100&nbsp;ms range. What you buy: lock-free snapshot reads at any timestamp in the past — a replica can serve a consistent read at timestamp <em>t</em> with zero coordination once its applied state covers <em>t</em>. For read-heavy agent fleets, this is the feature that matters more than write latency.</p>
+
+    <div class="aside">
+      <span class="k">Field note</span>
+      The determinism idea didn’t start with Calvin — it’s H-Store/VoltDB’s lineage, and Abadi’s group spent years being told that “no interactive transactions” made it a toy. Then FoundationDB shipped a deterministic-simulation-tested core, FaunaDB built directly on Calvin’s design, and the “toy” restriction quietly became a feature: a transaction you can declare is a transaction you can simulate, replay, and audit. Agent platforms rediscovered this in 2025 when audit logs of <em>exactly what an agent did</em> became a compliance requirement. Determinism is auditability.
+    </div>
+
+    <h3>The poles, side by side</h3>
+    <table>
+      <thead>
+        <tr><th>Dimension</th><th>Calvin (SIGMOD ’12)</th><th>Spanner (OSDI ’12)</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Ordering mechanism</td><td>Pre-agreed global log (Paxos on input batches)</td><td>TrueTime timestamps + 2PL</td></tr>
+        <tr><td>Distributed commit</td><td>None — determinism makes it unnecessary</td><td>2PC layered over Paxos groups</td></tr>
+        <tr><td>Interactive transactions</td><td>No; recon + re-submit for dependent ones</td><td>Yes, full <code>BEGIN…COMMIT</code></td></tr>
+        <tr><td>Consistency delivered</td><td>Serializable (one global order, by construction)</td><td>Externally consistent / strict serializable</td></tr>
+        <tr><td>Latency tax</td><td>Epoch batching (~10 ms) + recon trips</td><td>Commit wait ≈ 2ε (5–10 ms) + 2PC rounds</td></tr>
+        <tr><td>Special hardware</td><td>None</td><td>GPS + atomic clocks per datacenter</td></tr>
+        <tr><td>Failure handling</td><td>Replay the log; no aborts from failures</td><td>Paxos re-election; 2PC blocking bounded by group failover</td></tr>
+        <tr><td>Best-fit agent workload</td><td>High-throughput declared writes (tool calls with known keys)</td><td>Read-mostly fleets needing consistent global snapshots</td></tr>
+      </tbody>
+    </table>
+
+    <h3>MVCC and snapshot isolation: what engines already maintain</h3>
+    <p>The bridge to Thursday. Nearly every serious engine — Postgres, InnoDB, Oracle, SQL Server under RCSI, RocksDB-based systems — is already a <strong>multi-version</strong> store: an update doesn’t overwrite a row, it creates a new version stamped with a transaction ID, and old versions linger until vacuum/purge decides nobody can see them. <strong>Snapshot isolation</strong> falls out almost for free: give a transaction the set of versions committed as of its start, and it reads a frozen, consistent world while writers proceed. (Remember SI’s one famous leak — write skew: two transactions read overlapping data, write disjoint data, both commit, and an invariant spanning both rows breaks. Serializable SI à la Postgres <code>SERIALIZABLE</code> closes it by tracking rw-antidependencies.) The point I want you to carry out of the room: your database already pays the storage and bookkeeping cost of keeping <em>many coexisting versions of reality</em>. It then aggressively garbage-collects them after seconds. Branching, Thursday’s topic, is just the decision to keep one of those realities alive, give it a name, and let it diverge. The mechanism was always there; only the product was missing.</p>
+
+    <div class="pull">A branch is a <b>transaction</b> that lived long enough to get a name.</div>
+</section>
+
+<section class="block">
+  <div class="sec-label">Lecture 2 · Thursday</div>
+  <h2>Copy-on-Write Branching as Product</h2>
+  <p class="opener">Speculation is the defining agentic workload. An agent doesn’t know whether its migration script is right; the honest move is to run it somewhere consequence-free and look. Before 2022 “somewhere” meant a nightly-restored staging database, shared by everyone and trusted by no one. Copy-on-write branching changes the economics: a full, writable copy of a production-sized database in tens of milliseconds, costing only the pages you touch. Today: the mechanism from a single B-tree page up to a cloud product, the arithmetic of running ten thousand speculative branches an hour, and why branch–validate–merge — not write credentials — is the correct way to let agents write.</p>
+
+    <h3>Copy-on-write, from one LMDB page to a whole timeline</h3>
+    <p>Start small. LMDB is a memory-mapped B-tree where a writer <em>never modifies a page in place</em>: it writes the new version of a leaf to a free page, then new versions of every ancestor up to the root, then flips one of two meta pages to point at the new root. Readers grab whichever meta page was current when they started and traverse an immutable tree — no locks, no torn reads, and crash recovery is “use the last valid meta page.” Every commit is, structurally, a tiny fork: old root and new root coexist, sharing all unmodified pages. LMDB just recycles the old tree’s exclusive pages as soon as no reader holds them. ZFS and APFS snapshots, Aurora’s log-structured storage, and RocksDB checkpoints all play the same chord.</p>
+    <p>Neon plays it at cloud scale by separating compute from storage. Postgres runs unmodified as compute; the storage layer ingests the WAL — the write-ahead log, the totally ordered record of every page modification, addressed by <strong>LSN</strong> (log sequence number, a byte offset into history) — and indexes page versions by the pair (page&nbsp;id, LSN). When compute needs a page, it asks <code>GetPage@LSN</code> and the pageserver materializes that page <em>as of that point in history</em> from layered immutable files. Once your storage engine can answer “page P at LSN&nbsp;L” for any L it retains, time travel is a query parameter, and a branch is barely more than bookkeeping.</p>
+
+    <h3>Branch = a new timeline at a WAL LSN</h3>
+    <p>Creating a branch in Neon means writing one metadata record: <em>new timeline T₂, parent T₁, fork point LSN&nbsp;L</em>. No pages are copied — <strong>O(metadata), not O(data)</strong>; tens of milliseconds whether the parent holds 1&nbsp;GB or 10&nbsp;TB. Reads on T₂ for pages unwritten since the fork resolve through to the parent’s layer files at LSN ≤ L; writes on T₂ append to T₂’s own WAL and produce layer files only T₂ can see. The parent is never touched — it can’t even tell it has children, which is exactly the isolation property you want when the children are agents. Storage cost of a branch = (its own WAL and layers) + (a constant-size record), and the parent’s history up to L is now pinned: GC on the parent must retain everything a live child might read through.</p>
+
+    <figure>
+      <svg viewBox="0 0 800 360" role="img" aria-label="Diagram of WAL timeline with copy-on-write branches forking at LSNs">
+        <rect x="0" y="0" width="800" height="360" fill="#efe8d8"/>
+        <!-- main timeline -->
+        <line x1="60" y1="180" x2="740" y2="180" stroke="#1d1a15" stroke-width="3"/>
+        <polygon points="740,180 726,173 726,187" fill="#1d1a15"/>
+        <text x="62" y="166" font-family="monospace" font-size="14" fill="#1d1a15">main (T1)  — WAL →</text>
+        <!-- LSN ticks -->
+        <line x1="220" y1="172" x2="220" y2="188" stroke="#1d1a15" stroke-width="2"/>
+        <text x="196" y="208" font-family="monospace" font-size="13" fill="#1d1a15">LSN 0/52A0</text>
+        <line x1="470" y1="172" x2="470" y2="188" stroke="#1d1a15" stroke-width="2"/>
+        <text x="446" y="208" font-family="monospace" font-size="13" fill="#1d1a15">LSN 0/9F10</text>
+        <!-- branch A -->
+        <path d="M220 180 C 260 120, 300 100, 360 96 L 600 96" fill="none" stroke="#93321b" stroke-width="3"/>
+        <polygon points="600,96 586,89 586,103" fill="#93321b"/>
+        <text x="368" y="84" font-family="monospace" font-size="14" fill="#93321b">agent-7f/try-migration (T2)</text>
+        <text x="368" y="118" font-family="monospace" font-size="12" fill="#93321b">own WAL: dirty pages only</text>
+        <!-- branch B, abandoned -->
+        <path d="M470 180 C 505 250, 540 268, 590 272" fill="none" stroke="#93321b" stroke-width="3" stroke-dasharray="9 6"/>
+        <text x="600" y="278" font-family="monospace" font-size="14" fill="#93321b">agent-7f/plan-B (T3)</text>
+        <text x="600" y="298" font-family="monospace" font-size="12" fill="#93321b">abandoned → GC reclaims</text>
+        <!-- shared pages annotation -->
+        <text x="62" y="252" font-family="monospace" font-size="13" fill="#1d1a15">pages unwritten since fork:</text>
+        <text x="62" y="272" font-family="monospace" font-size="13" fill="#1d1a15">resolved from parent @ fork LSN</text>
+        <line x1="330" y1="248" x2="330" y2="190" stroke="#1d1a15" stroke-width="1.5" stroke-dasharray="4 5"/>
+        <!-- fork dots -->
+        <circle cx="220" cy="180" r="6" fill="#93321b"/>
+        <circle cx="470" cy="180" r="6" fill="#93321b"/>
+        <text x="62" y="330" font-family="monospace" font-size="13" fill="#1d1a15">branch create = 1 metadata record: (child, parent, fork LSN). O(metadata), ~10s of ms.</text>
+      </svg>
+      <figcaption>Fig. 8.1 — Branches as timelines forking from the parent’s WAL at a chosen LSN. Solid child: live, accumulating its own delta. Dashed child: abandoned; its exclusive layers are GC’d, while parent history up to the oldest live fork point stays pinned.</figcaption>
+    </figure>
+
+    <h3>Ten thousand speculative branches an hour</h3>
+    <p>Now the arithmetic, because “cheap” must survive multiplication. Suppose a planning fleet forks 10,000 branches/hour against a 64&nbsp;GB parent (8&nbsp;KB pages → 8.4&nbsp;M pages). Creation is free-ish: 10,000 metadata records and some control-plane traffic. Storage grows only with <em>divergence</em>. Measure your agents: a typical speculative run touches maybe 200 pages (a few tables, some index leaves, catalog if it DDLs) ≈ 1.6&nbsp;MB of exclusive layers. If branches live 5 minutes on average before being abandoned or merged, steady-state live branches = 10,000/h × (5/60)h ≈ 833, holding ≈ 833 × 1.6&nbsp;MB ≈ <strong>1.3&nbsp;GB</strong> of deltas against a 64&nbsp;GB base. Trivial. What is <em>not</em> trivial: (1)&nbsp;<strong>GC pressure</strong> — abandoned branches must actually die. Agents are terrible at cleanup (a crashed agent never calls <code>delete_branch</code>), so you need TTLs and a reaper, or the 1.6&nbsp;MB-each corpses accumulate at 16&nbsp;GB/hour — they overtake the base in four hours. (2)&nbsp;<strong>Parent GC pinning</strong> — one forgotten week-old branch pins a week of parent WAL and layer history; retention cost is set by your <em>oldest</em> live fork point, not your average. (3)&nbsp;<strong>Page-materialization load</strong> — 833 branches cold-reading the same hot pages turn the pageserver into a fan-out read amplifier; shared caches help precisely because the pages <em>are</em> shared.</p>
+    <p><strong>Worked example — 50 branches, 1% divergence each.</strong> Same 64&nbsp;GB parent. Each of 50 analyst-agent branches dirties 1% of pages: 0.01 × 8.4&nbsp;M ≈ 83,900 pages ≈ 0.64&nbsp;GB exclusive. Dirty pages are private even if two branches modify the <em>same</em> page — divergent versions can’t be shared — so deltas add linearly:</p>
+    <table>
+      <thead>
+        <tr><th>Strategy</th><th>Formula</th><th>Total storage</th><th>Create time</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>50 full copies (pg_dump/restore)</td><td>50 × 64 GB</td><td>3,200 GB</td><td>~40 min each</td></tr>
+        <tr><td>50 CoW branches @ 1% divergence</td><td>64 + 50 × 0.64 GB</td><td><strong>96 GB</strong></td><td>~50 ms each</td></tr>
+        <tr><td>Break-even divergence</td><td>shared wins until ≈ 98% dirty</td><td>—</td><td>—</td></tr>
+      </tbody>
+    </table>
+    <p>A 33× storage reduction, and the break-even calculation tells you CoW only loses when branches rewrite essentially the whole database — at which point they aren’t branches, they’re different databases. The honest caveat: long-lived branches drift. At 1% divergence <em>per day</em>, a branch parked for three months has rewritten most of its hot set and pinned a quarter-year of parent history. Branches are a speculation primitive, not an archival one.</p>
+
+    <h3>The agent transaction shape: long think-time, optimistic wins</h3>
+    <p>Look at an agent write through Tuesday’s lens. The shape is: read some rows (50&nbsp;ms) → call an LLM to decide (3–30&nbsp;s) → write (20&nbsp;ms). Under pessimistic two-phase locking, that transaction holds read locks across the think-time, and 30 seconds of held locks on a hot row is a denial-of-service attack you launched against yourself: at even 10 such transactions/sec touching one row, the queue never drains. The classic concurrency-control result (Agrawal–Carey–Livny, 1987) says optimistic methods win when conflicts are rare and transaction “footprint time” is long relative to execution — and the agent workload is that regime, taken to a comic extreme: think-time inflates duration 100–1000×, while genuine row-level conflict between agents working different tasks stays low. So the right discipline is <strong>read a snapshot, think with no locks held, then validate-and-write</strong>: at commit, check that everything you read is unchanged (version check on the read set), and abort-and-retry if not. Retries are cheap for agents — re-prompting with “the data changed, here’s the new state” is one more API call, and nobody is sitting at the keyboard getting angry. A branch is exactly this OCC pattern made durable: the snapshot you “read” is the fork LSN, the think-time can be minutes, and validation happens at merge.</p>
+
+    <div class="aside">
+      <span class="k">Field note</span>
+      A team I advised in 2025 gave a fleet of refund-processing agents a shared Postgres role with <code>UPDATE</code> on the ledger, reasoning that the agents’ prompts forbade anything dangerous. Within a month an agent, retrying after a timeout it had actually half-committed, issued the “same” refund batch twice — prompts are not idempotency keys. The postmortem fix was not a better prompt. It was revoking the write credential entirely: agents now write to branches, and a 40-line validator owns the only path to main. Incidents since: zero. The validator has rejected 3–4% of merges, which is the real number to frame on the wall — that’s how often a confident agent was about to be wrong in production.
+    </div>
+
+    <h3>Branch–validate–merge: the safe agent write path</h3>
+    <p>Which brings us to the architecture this week has been building toward. Giving an agent production write credentials means trusting the weakest prompt-injection in its context window with your ledger. Instead: <strong>(1)&nbsp;Branch</strong> — agent gets its own timeline at fork LSN&nbsp;L; full read/write freedom, zero blast radius. <strong>(2)&nbsp;Validate</strong> — a deterministic, non-LLM gate inspects the branch delta: schema diffs against policy, invariant queries (balances sum, foreign keys hold, row-count deltas within bounds), test suites run <em>on the branch</em>. <strong>(3)&nbsp;Merge</strong> — replay the branch’s logical changes onto main as one ordinary transaction, with OCC-style validation that main hasn’t conflictingly moved past L; on conflict, re-fork from the new head and let the agent reconcile. Notice what this is: Calvin’s insight, rediscovered at the workflow layer. The agent’s exploration was interactive, but the thing that touches main is a <em>declared, validated, replayable</em> change set — a deterministic transaction with a known write set, which is why the merge step needs no human and no 2PC, just one serialization point. The branch absorbed the interactivity; the merge inherits the auditability. That division of labor — speculation on cheap CoW timelines, commitment through a narrow deterministic gate — is, I’d argue, the transaction model of the agentic era.</p>
+</section>
+
+<section class="block">
+  <div class="sec-label">Readings</div>
+  <h2>Read Before Thursday</h2>
+  <div class="reads-block">
+    <div class="read-row"><div class="n">1</div><div class="t"><i>Calvin: Fast Distributed Transactions for Partitioned Database Systems</i> — Thomson, Diamond, Weng, Ren, Shao &amp; Abadi, SIGMOD 2012.<span class="v">Focus on §3 (the sequencer) and §3.2.1 (dependent transactions / OLLP) — convince yourself why determinism really removes 2PC, and what it costs.</span></div></div>
+    <div class="read-row"><div class="n">2</div><div class="t"><i>Spanner: Google’s Globally-Distributed Database</i> — Corbett et&nbsp;al., OSDI 2012.<span class="v">Read §3 (TrueTime) and §4.1.2 (commit wait) closely; skim the rest. Work the invariant: why must locks be held through the wait?</span></div></div>
+    <div class="read-row"><div class="n">3</div><div class="t"><i>Neon architecture posts: “Architecture decisions in Neon” &amp; the pageserver/branching deep-dives</i> — Neon engineering blog, 2022–24.<span class="v">Focus on GetPage@LSN, the layer-file map, and what branch creation actually writes — verify Thursday’s O(metadata) claim against their design.</span></div></div>
+  </div>
+</section>
+
+<section class="block">
+  <div class="sec-label">Exercises</div>
+  <h2>This Week’s Problems</h2>
+  <div class="exercise">
+    <div class="ex-head">Exercise 8.1 · warm-up</div>
+    <div class="ex-body"><p>A Spanner-style system has clock uncertainty ε = 4&nbsp;ms and intra-region Paxos replication latency of 2&nbsp;ms per round. (a)&nbsp;Estimate the minimum latency of a single-shard read-write commit, including commit wait. (b)&nbsp;Now a transaction spans 3 shards: add 2PC (prepare + commit, each Paxos-replicated). (c)&nbsp;A Calvin deployment with 10&nbsp;ms sequencing epochs runs the same 3-shard transaction with a fully known write set. Which system acknowledges first, and by roughly how much? (d)&nbsp;One sentence: which assumption, if violated, flips your answer to (c)?</p></div>
+  </div>
+  <div class="exercise">
+    <div class="ex-head">Exercise 8.2 · core</div>
+    <div class="ex-body"><p>Extend Thursday’s arithmetic. A 200&nbsp;GB parent (8&nbsp;KB pages) serves an agent platform that forks <em>b</em> branches/hour; each branch dirties <em>d</em>% of pages, lives <em>m</em> minutes if completed (70% of branches) and forever if its agent crashed without cleanup (30%), unless a reaper kills branches idle &gt; <em>R</em> minutes. (a)&nbsp;Derive steady-state branch storage as a function of (b,&nbsp;d,&nbsp;m,&nbsp;R). (b)&nbsp;For b = 2,000, d = 0.5, m = 10: plot (or tabulate) storage at R = 15, 60, 1440 minutes. (c)&nbsp;The oldest live fork point pins parent WAL at 5&nbsp;GB/hour of write traffic — add that term and recompute. (d)&nbsp;Recommend an R, and state the failure mode of setting it too low for agents with long think-times.</p></div>
+  </div>
+  <div class="exercise">
+    <div class="ex-head">Exercise 8.3 · stretch</div>
+    <div class="ex-body"><p>Design a merge protocol for branch–validate–merge and analyze its isolation guarantee. Agents fork at LSN&nbsp;L, produce a logical change set C with recorded read set R, and merge replays C onto main iff no committed-since-L transaction wrote into R. (a)&nbsp;Prove this yields serializability for merged change sets, or exhibit a counterexample — pay attention to write skew between two branches whose read sets overlap but whose write sets don’t, and to invariants spanning rows neither branch read. (b)&nbsp;Propose the cheapest strengthening that closes any gap you found (predicate read tracking? rw-antidependency checks à la SSI? invariant re-validation at merge?), and bound its cost in pages tracked per branch. (c)&nbsp;Open question, argue a position: should merges of <em>commutative</em> change sets (e.g., inserts into disjoint keyspaces) skip the serialization point entirely, CRDT-style — and what does your answer concede about external consistency for agents that communicate out of band? There is no settled answer; we’ll workshop the best two designs in Friday’s lab.</p></div>
+  </div>
+  <div class="fleuron">❦</div>
+</section>
+
+<nav class="pager">
+  <a href="week-07.html"><span class="dir">← Week 07</span><span class="ttl">The Lakehouse &amp; Open Formats</span></a>
+  <a class="next" href="week-09.html"><span class="dir">Week 09 →</span><span class="ttl">Text-to-SQL Is Not Solved; It’s Specified</span></a>
+</nav>
+
+</main>
+
+<footer class="site">
+  <div class="inner">
+    <span>DATA 2027 — a course that doesn’t exist yet · <a href="../index.html">Essay № 01</a> · <a href="../course.html">Essay № 02</a></span>
+    <span>CC BY 4.0 · built with <a href="https://claude.com/claude-code">Claude Code</a></span>
+  </div>
+</footer>
+
+</body>
+</html>

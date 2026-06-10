@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lab 2: Mini-Neon — Copy-on-Write Pages over Object Storage — DATA 2027</title>
+<meta name="description" content="Build a page layer over S3: WAL ingestion, GetPage@LSN, O(metadata) branching, and GC — then serve 50 concurrent agent branches from one parent.">
+<meta name="theme-color" content="#f6f1e7">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23f6f1e7'/%3E%3Cellipse cx='50' cy='28' rx='30' ry='12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 28v44c0 6.6 13.4 12 30 12s30-5.4 30-12V28' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 50c0 6.6 13.4 12 30 12s30-5.4 30-12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500;9..144,600;9..144,900&amp;family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400;1,6..72,500&amp;family=IBM+Plex+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<link rel="stylesheet" href="course.css">
+</head>
+<body>
+
+<div class="masthead">
+  <span><a href="index.html">DATA 2027</a> <span class="dot">●</span> DATA SYSTEMS IN THE AGENTIC ERA</span>
+  <span><a href="index.html">← SCHEDULE</a></span>
+</div>
+
+<header class="page-head">
+  <div class="kicker">Lab 2 · Weeks 5–8</div>
+  <h1>Mini-Neon — Copy-on-Write Pages over <em>Object</em> Storage</h1>
+  <p class="standfirst">Neon rebuilt Postgres storage as a log-structured index over S3; you will do the same in miniature. By the end of week 8 your pageserver hands 50 concurrent agents their own writable branch of one database — and cleans up after the 40 that wander off.</p>
+  <div class="meta"><b>Out:</b> Fri, week 5 · <b>Due:</b> Fri, week 8, 23:59 &nbsp;·&nbsp; <b>Weight:</b> 25% of course grade · <b>Teams:</b> pairs &nbsp;·&nbsp; <b>Language:</b> any with an S3 client (Go, Rust, Python shims provided)</div>
+</header>
+
+<main>
+
+<section class="block">
+  <div class="objectives">
+    <div class="k">Learning objectives — after this lab you can…</div>
+    <ul>
+      <li>Implement a log-structured page store that materializes any page at any LSN from immutable layer files in object storage.</li>
+      <li>Design binary record and layer-file formats whose read cost is bounded by layers touched, never by total WAL length.</li>
+      <li>Implement copy-on-write branching whose cost is independent of database size, by treating a branch as pure metadata.</li>
+      <li>State and defend a garbage-collection safety invariant for immutable layers shared across live branches.</li>
+      <li>Evaluate a storage system on a latency-versus-round-trips Pareto frontier with ablations, not point estimates.</li>
+    </ul>
+  </div>
+</section>
+
+<section class="block">
+  <div class="sec-label">Overview &amp; Goals</div>
+  <h2>What You Are Building</h2>
+  <p class="opener">You will build a <strong>pageserver</strong>: a service that ingests a write-ahead log, stores it as immutable layer files in an S3-compatible bucket, and answers one question fast — <code>GetPage(branch, page, lsn)</code>: “give me the 8&#8201;KiB image of page <code>p</code> as it existed at LSN <code>n</code> on branch <code>b</code>.” On top of that single primitive you get time travel for free, and branching becomes a metadata write: a new branch is just a record saying “I fork from timeline <code>T</code> at LSN <code>n</code>.” No pages are copied. Ever.</p>
+  <p>This is the storage architecture from the Neon paper read in week 5, stripped to its load-bearing walls: no SQL, no MVCC, no multi-tenancy. The page space is flat (<code>page_no</code> in <code>0…N−1</code>), there is exactly one writer per timeline, and the WAL stream is handed to you by our generator. Everything else — formats, layer organization, resolution, branching, GC — is yours.</p>
+
+  <div class="pull">A branch is not a copy. It is a <b>name</b> for an LSN you promise not to garbage-collect.</div>
+
+  <h3>Non-goals and forbidden shortcuts</h3>
+  <p>The grader instruments your S3 endpoint, so these are enforced mechanically, not on the honor system:</p>
+  <ul>
+    <li><strong>Forbidden:</strong> copying or rewriting any page data during <code>CreateBranch</code>. Branch creation must perform O(1) object writes regardless of parent size.</li>
+    <li><strong>Forbidden:</strong> a local-disk source of truth. Local disk is a cache only — mid-run, the grader deletes your scratch directory (“crash”) and immediately re-issues reads. They must still be correct.</li>
+    <li><strong>Forbidden:</strong> replaying unbounded WAL per read. <code>GetPage</code> may touch only the layers that cover the requested key and LSN range; we count GETs.</li>
+    <li><strong>Forbidden:</strong> using S3 <code>LIST</code> as the authority for which layers or branches exist. Listing is for debugging; your metadata must be self-describing.</li>
+    <li><strong>Non-goals:</strong> SQL, concurrent writers on one timeline, encryption, multi-region. Durability of WAL not yet flushed to S3 may rely on a local append-only log.</li>
+  </ul>
+
+  <h3>The key × LSN plane</h3>
+  <p>Think of all state as points in a two-dimensional plane: page number on one axis, LSN on the other. A <strong>delta layer</strong> is a rectangle — every WAL record for a key range over an LSN range, sorted by <code>(page, lsn)</code>. An <strong>image layer</strong> is a vertical slice — full 8&#8201;KiB images of every page in a key range as of a single LSN. Image layers exist purely to bound reads: resolution walks deltas backward only until it hits one.</p>
+
+  <figure>
+    <svg viewBox="0 0 800 360" role="img" aria-label="Layer map: image and delta layers in the key-by-LSN plane, with a branch forking from main and a GetPage resolution path">
+      <defs>
+        <marker id="arr" markerWidth="9" markerHeight="8" refX="7" refY="4" orient="auto">
+          <path d="M0 0 L8 4 L0 8 z" fill="#93321b"/>
+        </marker>
+        <marker id="arrk" markerWidth="9" markerHeight="8" refX="7" refY="4" orient="auto">
+          <path d="M0 0 L8 4 L0 8 z" fill="#1d1a15"/>
+        </marker>
+      </defs>
+      <!-- legend -->
+      <rect x="70" y="14" width="20" height="14" fill="none" stroke="#1d1a15" stroke-width="1.5"/>
+      <text x="98" y="26" font-family="IBM Plex Mono, monospace" font-size="11" fill="#1d1a15">delta layer (WAL over an LSN range)</text>
+      <rect x="412" y="12" width="6" height="18" fill="#93321b"/>
+      <text x="428" y="26" font-family="IBM Plex Mono, monospace" font-size="11" fill="#1d1a15">image layer (full pages @ one LSN)</text>
+      <!-- main band -->
+      <text x="70" y="50" font-family="IBM Plex Mono, monospace" font-size="11" fill="#93321b">timeline: main</text>
+      <rect x="140" y="58" width="6" height="100" fill="#93321b"/>
+      <rect x="152" y="58" width="152" height="100" fill="none" stroke="#1d1a15" stroke-width="1.5"/>
+      <rect x="310" y="58" width="6" height="100" fill="#93321b"/>
+      <rect x="322" y="58" width="152" height="100" fill="none" stroke="#1d1a15" stroke-width="1.5"/>
+      <rect x="492" y="58" width="208" height="100" fill="none" stroke="#1d1a15" stroke-width="1.5"/>
+      <!-- fork line -->
+      <line x1="482" y1="52" x2="482" y2="312" stroke="#1d1a15" stroke-width="1.5" stroke-dasharray="6 4"/>
+      <text x="474" y="180" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="11" fill="#93321b">CREATE BRANCH agent-07 @ 0x48</text>
+      <!-- child band -->
+      <text x="70" y="180" font-family="IBM Plex Mono, monospace" font-size="11" fill="#93321b">timeline: agent-07</text>
+      <rect x="492" y="192" width="150" height="100" fill="none" stroke="#1d1a15" stroke-width="1.5"/>
+      <!-- query + resolution path -->
+      <circle cx="600" cy="242" r="5" fill="#93321b"/>
+      <text x="612" y="238" font-family="IBM Plex Mono, monospace" font-size="11" fill="#1d1a15">GetPage(p, @0x5a)</text>
+      <polyline points="600,242 498,242 466,242 466,108 326,108" fill="none" stroke="#93321b" stroke-width="2" stroke-dasharray="4 3" marker-end="url(#arr)"/>
+      <!-- axis -->
+      <line x1="60" y1="330" x2="760" y2="330" stroke="#1d1a15" stroke-width="1.5" marker-end="url(#arrk)"/>
+      <text x="768" y="334" font-family="IBM Plex Mono, monospace" font-size="11" fill="#1d1a15" text-anchor="end" dy="-10">LSN →</text>
+      <line x1="143" y1="330" x2="143" y2="337" stroke="#1d1a15" stroke-width="1.5"/>
+      <text x="143" y="352" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" fill="#1d1a15">0x10</text>
+      <line x1="313" y1="330" x2="313" y2="337" stroke="#1d1a15" stroke-width="1.5"/>
+      <text x="313" y="352" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" fill="#1d1a15">0x30</text>
+      <line x1="482" y1="330" x2="482" y2="337" stroke="#1d1a15" stroke-width="1.5"/>
+      <text x="482" y="352" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" fill="#1d1a15">0x48</text>
+      <line x1="642" y1="330" x2="642" y2="337" stroke="#1d1a15" stroke-width="1.5"/>
+      <text x="642" y="352" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" fill="#1d1a15">0x5a</text>
+      <line x1="700" y1="330" x2="700" y2="337" stroke="#1d1a15" stroke-width="1.5"/>
+      <text x="700" y="352" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" fill="#1d1a15">0x70</text>
+    </svg>
+    <figcaption>Fig. 1 — The layer map. Vertical red bars are image layers; outlined rectangles are delta layers. <code>agent-07</code> forks from <code>main</code> at 0x48 by writing one metadata object. The dashed path shows GetPage(p, @0x5a) resolving: newest delta on the child, hop to the parent at the fork LSN, walk parent deltas back to the image layer at 0x30, then replay forward.</figcaption>
+  </figure>
+
+  <h3>Wire format, bucket layout, reference API</h3>
+  <p>Your implementation may use any language; the formats below are normative. All integers are little-endian. Pages are exactly 8,192 bytes.</p>
+  <pre><code>// ---- WAL record (as emitted by walgen, little-endian) -------------
+// off      size  field     notes
+// 0        8     lsn       uint64, strictly increasing within a timeline
+// 8        4     page_no   uint32, flat page space 0..N-1
+// 12       1     kind      uint8: 1 = FULL_PAGE, 2 = DELTA
+// 13       2     plen      uint16, payload length in bytes
+// 15       plen  payload   FULL_PAGE: 8192-byte image
+//                          DELTA: k × { uint16 off; uint16 len; len bytes }
+// 15+plen  4     crc32c    over bytes [0, 15+plen); reject on mismatch
+
+// ---- bucket layout (names normative, layer encoding is yours) -----
+// s3://lab2-&lt;team&gt;/tl/&lt;timeline_id&gt;/img__&lt;keylo&gt;-&lt;keyhi&gt;__&lt;lsn&gt;
+//   full images of pages in [keylo, keyhi] as of &lt;lsn&gt;; indexed for
+//   single-GET point lookup (range GETs allowed)
+// s3://lab2-&lt;team&gt;/tl/&lt;timeline_id&gt;/del__&lt;keylo&gt;-&lt;keyhi&gt;__&lt;lo&gt;-&lt;hi&gt;
+//   every WAL record with page in [keylo, keyhi], lsn in (lo, hi],
+//   sorted by (page_no, lsn)
+// s3://lab2-&lt;team&gt;/branches/&lt;name&gt;.json
+//   authoritative branch metadata; LIST is never the source of truth
+
+// ---- reference API (Go-flavored pseudocode) ------------------------
+type LSN uint64
+type PageID uint32
+
+func IngestWAL(rec []byte) (LSN, error)        // validate crc32c, append
+func Flush() error                             // seal open layer, PUT to S3
+func GetPage(branch string, p PageID,
+             at LSN) ([]byte, error)           // exactly 8192 bytes
+func CreateBranch(name, parent string,
+                  at LSN) error                // O(metadata); no page I/O
+func DeleteBranch(name string) error           // mark dead; GC reclaims
+func RunGC(horizon time.Duration) (GCReport, error) // two-phase, safe</code></pre>
+</section>
+
+<section class="block">
+  <div class="sec-label">Provided Materials</div>
+  <h2>What Is in the Starter Kit</h2>
+  <div class="reads-block">
+    <div class="read-row"><div class="n">1</div><div class="t"><i>lab2-starter</i> repository.<span class="v">MinIO docker-compose, thin S3 client shims for Go/Rust/Python, Makefile with `make conform`, `make swarm`, `make frontier`</span></div></div>
+    <div class="read-row"><div class="n">2</div><div class="t"><i>walgen</i> — deterministic WAL generator.<span class="v">seeded streams; seeds 1–9 are the grading seeds; emits records in the wire format above</span></div></div>
+    <div class="read-row"><div class="n">3</div><div class="t">Conformance vectors.<span class="v">(seed, page, lsn) → sha256 of the expected page image; 1,000 sampled historical reads per seed</span></div></div>
+    <div class="read-row"><div class="n">4</div><div class="t"><i>swarm</i> harness.<span class="v">spawns 50 agent processes, each branching from one parent and running a read/write mix; 40 exit without calling DeleteBranch</span></div></div>
+    <div class="read-row"><div class="n">5</div><div class="t">Report template <code>report/REPORT.md</code>.<span class="v">required headers for the ablation table, the Pareto plot, and the GC safety argument</span></div></div>
+  </div>
+</section>
+
+<section class="block">
+  <div class="sec-label">Milestone 1 · Week 5</div>
+  <h2>WAL Ingestion and Page Materialization</h2>
+  <p>Ingest a <code>walgen</code> stream into an in-memory open layer; on <code>Flush()</code> (or a configurable size threshold), seal it into a delta layer object and PUT it to the bucket. Reject any record with a bad CRC and return the LSN of the last durable record. Then implement <code>GetPage</code> at the head LSN only: locate the covering layers, replay the page’s records in ascending LSN order starting from its most recent <code>FULL_PAGE</code>, and return the image.</p>
+  <p>Survive the crash test: after the grader deletes local scratch state, a fresh process pointed at the same bucket must answer the same reads correctly. This forces your layer inventory to be reconstructible from durable metadata, not from a warm process.</p>
+  <p><strong>Exit criteria:</strong> all head-LSN conformance vectors pass on seeds 1–3, before and after the simulated crash.</p>
+</section>
+
+<section class="block">
+  <div class="sec-label">Milestone 2 · Week 6</div>
+  <h2>Time Travel: GetPage@LSN</h2>
+  <p>Generalize to arbitrary LSNs and add image layers as read-bound insurance. The normative resolution algorithm, which Milestone 3 extends across timelines:</p>
+  <ol>
+    <li>Set <code>T ←</code> the request’s timeline and <code>L ← min(at, head_lsn(T))</code>.</li>
+    <li>In <code>T</code>’s layer map, collect delta layers whose key range contains <code>p</code> and whose LSN range intersects <code>(L_img, L]</code>, newest first, stopping at the newest image layer for <code>p</code> with <code>lsn ≤ L</code> (call it <code>L_img</code>).</li>
+    <li>If no image layer exists in <code>T</code> and <code>T</code> has a parent: set <code>L ← min(L, fork_lsn(T))</code>, <code>T ← parent(T)</code>, go to step 2.</li>
+    <li>Replay the collected records for <code>p</code> in ascending LSN order onto the image; return the page.</li>
+  </ol>
+  <p>Write image layers during compaction on a configurable interval (every <code>D</code> bytes of WAL per key range). This knob is your main ablation axis in the evaluation: small <code>D</code> means fewer deltas per read but more bucket bytes; large <code>D</code> means the opposite.</p>
+  <p><strong>Exit criteria:</strong> 1,000 sampled <code>(page, lsn)</code> historical reads per seed match the vectors; instrumentation shows GETs per read bounded by layers intersected, independent of total WAL length.</p>
+</section>
+
+<section class="block">
+  <div class="sec-label">Milestone 3 · Week 7</div>
+  <h2>CREATE BRANCH in O(metadata)</h2>
+  <p><code>CreateBranch(name, parent, at)</code> writes exactly one object: <code>branches/&lt;name&gt;.json</code>. It must validate <code>at ≤</code> the parent’s <em>flushed</em> LSN (a fork above durable WAL would dangle), then the new timeline starts empty and resolution hops to the parent per step 3 above. Writes to the child append to the child’s timeline only; the parent never observes them.</p>
+  <table>
+    <thead>
+      <tr><th>Field</th><th>Type</th><th>Meaning</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>branch_id</code></td><td>uuid</td><td>stable identity; <code>name</code> is a mutable alias</td></tr>
+      <tr><td><code>parent_id</code></td><td>uuid | null</td><td>null only for <code>main</code></td></tr>
+      <tr><td><code>fork_lsn</code></td><td>LSN</td><td>reads at <code>lsn ≤ fork_lsn</code> resolve through the ancestor chain</td></tr>
+      <tr><td><code>head_lsn</code></td><td>LSN</td><td>highest durable LSN on this timeline</td></tr>
+      <tr><td><code>state</code></td><td>enum</td><td><code>live</code> | <code>dead</code> (set by DeleteBranch; GC consumes)</td></tr>
+      <tr><td><code>created_at</code>, <code>last_read_at</code></td><td>timestamps</td><td>inputs to the abandonment policy in Milestone 4</td></tr>
+    </tbody>
+  </table>
+  <p><strong>Exit criteria:</strong> branch-create p99 latency is flat (within noise) across parents of 1&#8201;GiB and 8&#8201;GiB; reads on a child below <code>fork_lsn</code> are byte-identical to reads on the parent at the same LSN.</p>
+</section>
+
+<section class="block">
+  <div class="sec-label">Milestone 4 · Week 8</div>
+  <h2>GC and the 50-Branch Swarm</h2>
+  <p>Immutable layers are shared down the ancestry tree, so deletion needs a real argument, not a TTL. Your report must state and defend the safety invariant — a sufficient form: <em>a layer on timeline <code>T</code> may be deleted only if, for every live branch whose ancestry passes through <code>T</code>, every readable LSN that could resolve through that layer is already covered by a newer image layer at or below it.</em> “Readable” is defined by your retention policy: each branch’s head, plus a PITR horizon, plus every descendant’s <code>fork_lsn</code>. Note that a layer entirely older than every head can still be load-bearing if it sits below a fork — see Pitfalls.</p>
+  <p>Run GC in two phases: mark candidates against a snapshot of authoritative branch metadata, wait out a grace epoch (in-flight <code>GetPage</code> calls may hold a stale layer map), then issue DELETEs. Branch abandonment is a policy you choose and justify — e.g. <code>state = dead</code>, or <code>live</code> with <code>last_read_at</code> older than a configured idle horizon.</p>
+  <p>Finally, the demo: <code>make swarm</code> creates 50 branches from one parent and runs concurrent agents against them; 40 abandon their branch without cleanup. After GC, the 10 surviving branches must pass conformance reads, and bucket bytes attributable solely to abandoned branches must be reclaimed. The harness prints both numbers.</p>
+  <p><strong>Exit criteria:</strong> zero wrong reads after GC across three consecutive swarm runs; reclaimed-bytes ratio reported; safety argument written.</p>
+</section>
+
+<section class="block">
+  <div class="sec-label">Grading Rubric</div>
+  <h2>How the 100 Points Fall</h2>
+  <p>Performance is graded on a Pareto frontier, not a point estimate: submit at least three configurations (vary the image-layer interval <code>D</code>; optionally cache size and layer fan-out) and we plot GetPage p50/p99 against mean S3 GETs per read. Dominated frontiers lose points; a slow-but-honest frontier beats a fast number we cannot reproduce. The ablation table in <code>REPORT.md</code> needs one row per configuration with columns: p50, p99, GETs/read (cold and warm), bucket bytes, branch-create p99.</p>
+  <table>
+    <thead>
+      <tr><th>Component</th><th>Points</th><th>What we measure</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>M1 — WAL ingestion &amp; materialization</td><td>10</td><td>head-LSN vectors pass; CRC rejection; crash test</td></tr>
+      <tr><td>M2 — GetPage@LSN time travel</td><td>15</td><td>1,000 historical reads per seed; layers-touched bound holds</td></tr>
+      <tr><td>M3 — O(metadata) branching</td><td>15</td><td>create p99 flat from 1 to 8&#8201;GiB; child/parent read equivalence</td></tr>
+      <tr><td>M4 — GC + 50-branch swarm</td><td>15</td><td>bytes reclaimed; zero wrong reads after GC, three runs</td></tr>
+      <tr><td>Performance frontier</td><td>20</td><td>p50/p99 vs GETs-per-read Pareto across ≥ 3 configurations</td></tr>
+      <tr><td>Report: design, ablations, GC argument</td><td>15</td><td>complete ablation table; invariant stated and defended</td></tr>
+      <tr><td>Code quality &amp; reproducibility</td><td>10</td><td><code>make demo</code> runs everything from a clean MinIO</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section class="block">
+  <div class="sec-label">Pitfalls</div>
+  <h2>Where Previous Cohorts Lost Points</h2>
+  <div class="aside">
+    <span class="k">Pitfall · the copy trap</span>
+    If <code>CreateBranch</code> ever reads or writes page data, you have built a slow <code>pg_dump</code>, and the 1-vs-8&#8201;GiB latency check will fail loudly. Branching is one JSON PUT. If your design “needs” to seed the child with images, your resolution algorithm is wrong, not your branch path.
+  </div>
+  <div class="aside">
+    <span class="k">Pitfall · LSN boundary semantics</span>
+    A record at LSN <code>n</code> produces the page version readable <em>at</em> <code>n</code>; that version remains valid on <code>[n, next)</code>. Decide once whether delta-layer ranges are <code>(lo, hi]</code> (we recommend it; it composes with <code>fork_lsn</code>) and use it everywhere. Most wrong-read bugs in this lab are a <code>&lt;</code> that should be <code>≤</code> at a fork point.
+  </div>
+  <div class="aside">
+    <span class="k">Pitfall · LIST is not a catalog</span>
+    Driving correctness from <code>ListObjects</code> couples you to listing latency and to half-written state after a crash mid-flush. Write metadata that names every live layer, commit it atomically (PUT-then-rename pattern, or a versioned manifest), and treat unreferenced objects as garbage by definition.
+  </div>
+  <div class="aside">
+    <span class="k">Pitfall · GC below a fork</span>
+    A layer can be older than every branch head and still be the <em>only</em> path to pages a child reads below its <code>fork_lsn</code>. Any policy of the shape “delete layers older than X” is unsafe without consulting the fork-point set. Checkpoint 2.3 makes you construct the counterexample.
+  </div>
+  <div class="aside">
+    <span class="k">Pitfall · caches hiding your GETs</span>
+    A warm local cache makes any design look great. The frontier requires cold and warm columns separately, and the grader counts GETs at the MinIO proxy — not in your code. Benchmark from a cleared cache or your numbers will not reproduce.
+  </div>
+</section>
+
+<section class="block">
+  <div class="sec-label">Checkpoints</div>
+  <h2>Checkpoint Questions</h2>
+  <p>Answer in <code>report/CHECKPOINTS.md</code>; graded with the report. These are designed so that a correct implementation makes them easy and a confused one makes them impossible.</p>
+  <div class="exercise">
+    <div class="ex-head">Checkpoint 2.1 · resolution trace</div>
+    <div class="ex-body"><p>Timeline <code>main</code> holds <code>img__0-99__0x10</code>, <code>del__0-99__0x10-0x30</code>, <code>img__0-99__0x30</code>, <code>del__0-99__0x30-0x48</code>, <code>del__0-99__0x48-0x70</code>. Branch <code>agent-07</code> forks at <code>0x48</code> and holds <code>del__0-99__0x48-0x5e</code>. For <code>GetPage("agent-07", 9, 0x5a)</code>, list every object read, in order, with the timeline hop marked; give the cold-cache GET count; then repeat for <code>at = 0x44</code> and explain why the child’s delta layer is not consulted.</p></div>
+  </div>
+  <div class="exercise">
+    <div class="ex-head">Checkpoint 2.2 · the cost of a branch</div>
+    <div class="ex-body"><p>Enumerate the exact bytes <code>CreateBranch</code> writes and argue from your design that the count is independent of parent size. Then: the parent’s <code>head_lsn</code> advances concurrently with branch creation. Why must <code>fork_lsn</code> be validated against the parent’s <em>flushed</em> LSN rather than its in-memory head, and what wrong read becomes possible if you skip that check and the parent crashes before its next flush?</p></div>
+  </div>
+  <div class="exercise">
+    <div class="ex-head">Checkpoint 2.3 · breaking naive GC</div>
+    <div class="ex-body"><p>A teammate proposes: “delete any delta layer whose <code>lsn_hi</code> is older than 24 hours of WAL behind every branch head.” Construct a concrete branch topology and read that this policy corrupts. State your safety invariant precisely, and explain why the two-phase mark/grace/delete protocol is still required even when the invariant is evaluated correctly — i.e., what failure does the grace epoch alone prevent?</p></div>
+  </div>
+  <div class="fleuron">❦</div>
+</section>
+
+<nav class="pager">
+  <a href="lab-1.html"><span class="dir">← Lab 1</span><span class="ttl">Lab 1</span></a>
+  <a class="next" href="lab-3.html"><span class="dir">Lab 3 →</span><span class="ttl">Lab 3</span></a>
+</nav>
+
+</main>
+
+<footer class="site">
+  <div class="inner">
+    <span>DATA 2027 — a course that doesn’t exist yet · <a href="../index.html">Essay № 01</a> · <a href="../course.html">Essay № 02</a></span>
+    <span>CC BY 4.0 · built with <a href="https://claude.com/claude-code">Claude Code</a></span>
+  </div>
+</footer>
+
+</body>
+</html>

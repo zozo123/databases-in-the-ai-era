@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Week 7: The Lakehouse &amp; Open Formats — DATA 2027</title>
+<meta name="description" content="Iceberg's metadata tree, optimistic concurrency over object storage, Photon and engines over open files, and why the catalog is now the agent's map.">
+<meta name="theme-color" content="#f6f1e7">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23f6f1e7'/%3E%3Cellipse cx='50' cy='28' rx='30' ry='12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 28v44c0 6.6 13.4 12 30 12s30-5.4 30-12V28' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 50c0 6.6 13.4 12 30 12s30-5.4 30-12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500;9..144,600;9..144,900&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400;1,6..72,500&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="course.css">
+</head>
+<body>
+
+<div class="masthead">
+  <span><a href="index.html">DATA 2027</a> <span class="dot">●</span> DATA SYSTEMS IN THE AGENTIC ERA</span>
+  <span><a href="index.html">← SCHEDULE</a></span>
+</div>
+
+<header class="page-head">
+  <div class="kicker">Week 07 · Part II — New Access Methods &amp; Engines</div>
+  <h1>The Lakehouse &amp; <em>Open</em> Formats</h1>
+  <p class="standfirst">The database disaggregated itself: storage became Parquet files on S3, the “table” became a tree of metadata files, and the engine became a replaceable visitor. This week we study how a pile of immutable files acquires ACID semantics — and why, in a world of agents, the catalog is the part that matters most.</p>
+  <div class="meta"><b>Lectures:</b> Tue — Iceberg internals: the metadata tree · Thu — Photon and engines over open files &nbsp;·&nbsp; <b>Lab:</b> Fri — Build a toy table format over local Parquet; race two writers</div>
+</header>
+
+<main>
+
+<section class="block">
+  <div class="objectives">
+    <div class="k">Learning objectives — after this week you can…</div>
+    <ul>
+      <li>Trace a query through Iceberg’s metadata tree (table metadata → snapshot → manifest list → manifests → data files) and count exactly which files get read during planning.</li>
+      <li>Explain why one atomic compare-and-swap on a metadata pointer is sufficient to give serializable commits over an object store with no server in the write path.</li>
+      <li>Contrast hidden partitioning and ID-based schema evolution with Hive’s directory-and-name conventions, and predict which queries each breaks.</li>
+      <li>Summarize the lakehouse argument (CIDR 2021) and Photon’s engineering bet (SIGMOD 2022): vectorized C++ over open Parquet beats a closed JVM engine without giving up format openness.</li>
+      <li>Argue for or against the claim that for agent workloads the catalog — not the engine — is the accuracy-critical component.</li>
+    </ul>
+  </div>
+</section>
+
+<section class="block">
+  <div class="sec-label">Lecture 1 · Tuesday</div>
+  <h2>Iceberg Internals: The Metadata Tree</h2>
+
+  <p class="opener">Start with the failure that made this field. Until roughly 2018, a “table” on a data lake was a Hive-style convention: a directory, with subdirectories encoding partitions (<code>dt=2026-06-09/region=eu/</code>), and a metastore row pointing at the root. The set of files in the table was defined as <i>whatever a directory listing returns right now</i>. Every property of a real database that you’ve taken for granted since Week 1 dies on that definition. Atomicity: a job writing 800 files into a partition is visible 1 file at a time, so readers see torn writes for minutes. Consistency: S3’s <code>LIST</code> pages 1,000 keys per call, so planning a query over a million-file table costs 1,000 sequential API round-trips — tens of seconds before a single byte of data is read — and for years those listings were only eventually consistent. Isolation: there is none; <code>INSERT OVERWRITE</code> deletes files out from under running queries. The Hive model isn’t a bad database. It is not a database. Iceberg’s contribution — Ryan Blue’s team at Netflix, 2018 — is to stop defining a table by where its files live and instead define it by a persistent, immutable <b>metadata tree</b> whose root is a single swappable pointer.</p>
+
+  <h3>The tree, level by level</h3>
+  <p>An Iceberg table is four layers of immutable files, each written once and never modified. At the root sits the <b>table metadata file</b> (<code>v3.metadata.json</code>): the schema (with every column carrying a permanent integer ID), the partition spec, table properties, and the list of <b>snapshots</b> — every committed version of the table, each with a timestamp and an operation summary. A snapshot points to one <b>manifest list</b>, an Avro file with one row per manifest, including per-manifest partition-value ranges. Each <b>manifest</b> is itself an Avro file listing data files, and for every file it records the partition tuple, record count, file size, and per-column lower/upper bounds, null counts, and NaN counts. The leaves are ordinary <b>Parquet data files</b>. The catalog — the only mutable thing in the whole system — stores one pointer per table: “<code>db.events</code> → <code>v3.metadata.json</code>”.</p>
+
+  <figure>
+    <svg viewBox="0 0 800 360" role="img" aria-label="Iceberg metadata tree: catalog pointer to table metadata, to manifest list, to manifests, to data files">
+      <!-- catalog -->
+      <rect x="14" y="132" width="152" height="92" fill="none" stroke="#93321b" stroke-width="2.5" stroke-linejoin="round"/>
+      <text x="28" y="156" font-family="monospace" font-size="13" fill="#93321b">CATALOG</text>
+      <text x="28" y="178" font-family="monospace" font-size="12" fill="#1d1a15">db.events &#8594;</text>
+      <text x="28" y="196" font-family="monospace" font-size="12" fill="#1d1a15">v3.metadata</text>
+      <text x="28" y="214" font-family="monospace" font-size="11" fill="#1d1a15">(only mutable bit)</text>
+      <text x="14" y="252" font-family="monospace" font-size="11" fill="#93321b">commit = CAS this</text>
+      <text x="14" y="268" font-family="monospace" font-size="11" fill="#93321b">pointer, v3 &#8594; v4</text>
+      <!-- arrow catalog -> metadata -->
+      <path d="M166 178 L 206 178" stroke="#93321b" stroke-width="2" fill="none"/>
+      <path d="M199 173 L 208 178 L 199 183" stroke="#93321b" stroke-width="2" fill="none" stroke-linecap="round"/>
+      <!-- metadata file -->
+      <rect x="210" y="118" width="170" height="120" fill="none" stroke="#1d1a15" stroke-width="2" stroke-linejoin="round"/>
+      <text x="224" y="142" font-family="monospace" font-size="12" fill="#93321b">v3.metadata.json</text>
+      <text x="224" y="162" font-family="monospace" font-size="11" fill="#1d1a15">schema (col IDs)</text>
+      <text x="224" y="180" font-family="monospace" font-size="11" fill="#1d1a15">partition spec</text>
+      <text x="224" y="198" font-family="monospace" font-size="11" fill="#1d1a15">snapshots:</text>
+      <text x="224" y="216" font-family="monospace" font-size="11" fill="#1d1a15">s1 s2 [s3]*</text>
+      <!-- arrow metadata -> manifest list -->
+      <path d="M380 178 L 420 178" stroke="#93321b" stroke-width="2" fill="none"/>
+      <path d="M413 173 L 422 178 L 413 183" stroke="#93321b" stroke-width="2" fill="none" stroke-linecap="round"/>
+      <!-- manifest list -->
+      <rect x="424" y="128" width="158" height="100" fill="none" stroke="#1d1a15" stroke-width="2" stroke-linejoin="round"/>
+      <text x="438" y="152" font-family="monospace" font-size="12" fill="#93321b">snap-s3.avro</text>
+      <text x="438" y="170" font-family="monospace" font-size="11" fill="#1d1a15">manifest list</text>
+      <text x="438" y="190" font-family="monospace" font-size="11" fill="#1d1a15">m1: dt&#8804;06-08</text>
+      <text x="438" y="208" font-family="monospace" font-size="11" fill="#1d1a15">m2: dt=06-09</text>
+      <!-- arrows to manifests -->
+      <path d="M582 158 C 612 140, 612 110, 632 92" stroke="#93321b" stroke-width="2" fill="none"/>
+      <path d="M624 94 L 634 90 L 631 100" stroke="#93321b" stroke-width="2" fill="none" stroke-linecap="round"/>
+      <path d="M582 200 C 612 218, 612 248, 632 266" stroke="#93321b" stroke-width="2" fill="none"/>
+      <path d="M624 264 L 634 268 L 631 258" stroke="#93321b" stroke-width="2" fill="none" stroke-linecap="round"/>
+      <!-- manifest m1 -->
+      <rect x="636" y="40" width="120" height="86" fill="none" stroke="#1d1a15" stroke-width="2" stroke-linejoin="round"/>
+      <text x="648" y="62" font-family="monospace" font-size="12" fill="#93321b">m1.avro</text>
+      <text x="648" y="80" font-family="monospace" font-size="11" fill="#1d1a15">per file:</text>
+      <text x="648" y="96" font-family="monospace" font-size="11" fill="#1d1a15">min/max,</text>
+      <text x="648" y="112" font-family="monospace" font-size="11" fill="#1d1a15">nulls, rows</text>
+      <!-- manifest m2 -->
+      <rect x="636" y="214" width="120" height="86" fill="none" stroke="#1d1a15" stroke-width="2" stroke-linejoin="round"/>
+      <text x="648" y="236" font-family="monospace" font-size="12" fill="#93321b">m2.avro</text>
+      <text x="648" y="254" font-family="monospace" font-size="11" fill="#1d1a15">per file:</text>
+      <text x="648" y="270" font-family="monospace" font-size="11" fill="#1d1a15">min/max,</text>
+      <text x="648" y="286" font-family="monospace" font-size="11" fill="#1d1a15">nulls, rows</text>
+      <!-- data files -->
+      <path d="M756 70 L 776 70" stroke="#1d1a15" stroke-width="1.5" stroke-dasharray="4 3" fill="none"/>
+      <path d="M756 250 L 776 250" stroke="#1d1a15" stroke-width="1.5" stroke-dasharray="4 3" fill="none"/>
+      <text x="700" y="150" font-family="monospace" font-size="11" fill="#1d1a15">a.parquet</text>
+      <text x="700" y="166" font-family="monospace" font-size="11" fill="#1d1a15">b.parquet</text>
+      <text x="700" y="182" font-family="monospace" font-size="11" fill="#1d1a15">&#8230; (data)</text>
+      <path d="M696 96 L 696 140" stroke="#93321b" stroke-width="1.5" stroke-dasharray="4 3" fill="none"/>
+      <path d="M696 214 L 696 192" stroke="#93321b" stroke-width="1.5" stroke-dasharray="4 3" fill="none"/>
+      <!-- footer note -->
+      <text x="210" y="332" font-family="monospace" font-size="11" fill="#93321b">everything right of the catalog is immutable; readers never block writers</text>
+    </svg>
+    <figcaption>Fig. 7.1 — The Iceberg metadata tree. A query plans by walking metadata files (small, statistics-rich Avro/JSON), never by listing directories. A commit creates new files bottom-up, then performs one atomic swap of the catalog pointer.</figcaption>
+  </figure>
+
+  <p>Do the arithmetic for a 1M-file table, query <code>WHERE dt = '2026-06-09' AND user_id = 42</code>. Hive: ~1,000 <code>LIST</code> calls just to enumerate files, then open every file in the matching partition. Iceberg: read 1 metadata JSON (~100 KB), 1 manifest list (one row per manifest — a few thousand rows), then only the manifests whose partition range can contain <code>dt = 2026-06-09</code>, then only the data files whose <code>user_id</code> min/max bounds straddle 42. Planning touches perhaps a dozen files, in parallel, with cost proportional to <i>data that might match</i>, not table size. The min/max pruning at the manifest level is the same zone-map idea you saw inside column stores in Week 5 — lifted out of the engine and into the table format itself, where every engine inherits it for free.</p>
+
+  <h3>Commits: one CAS to rule them all</h3>
+  <p>Writes exploit immutability. A writer appending data (1) writes its Parquet files, (2) writes a new manifest listing them, (3) writes a new manifest list that includes both old and new manifests, (4) writes a new table metadata file <code>v4.metadata.json</code> with a new snapshot, and (5) asks the catalog to atomically compare-and-swap the table pointer from v3 to v4. Steps 1–4 are invisible to everyone — just unreferenced objects in a bucket. All the atomicity in the system is concentrated into step 5, a single CAS on a few hundred bytes, done in a metastore lock, a DynamoDB conditional put, or a REST catalog’s conditional <code>POST</code>. If two writers race, one CAS fails; the loser re-reads the current metadata, checks whether the winner’s changes actually conflict with its own (two appends to disjoint files don’t — it can re-attach its manifests to the new base and retry; a compaction that rewrote files the loser also rewrote does, and aborts). This is textbook optimistic concurrency control from Week 3, with the validation step made cheap because manifests tell you exactly which files each transaction touched. Readers, meanwhile, pin a snapshot at plan time and never take a lock: every file they will read is immutable, so a long analytical scan can run for an hour while a hundred commits land.</p>
+
+  <div class="aside">
+    <span class="k">Field note</span>
+    Netflix’s motivating horror story: an atomic-looking Hive write was implemented as “write to temp directory, then rename.” On HDFS, rename is an O(1) metadata operation. On S3 there is no rename — it’s copy-then-delete, one object at a time, non-atomic and slow. Jobs that “committed” in milliseconds on-prem took 10+ minutes in the cloud and could fail halfway, leaving half-renamed tables that on-call engineers reconciled by hand. Iceberg’s design rule — <i>never depend on a filesystem operation stronger than “write a new object”</i> — falls directly out of that incident.
+  </div>
+
+  <h3>Hidden partitioning and schema evolution</h3>
+  <p>Hive partitioning leaks into queries: the table has a <code>dt</code> string column derived from <code>event_ts</code>, and if an analyst (or an LLM) writes <code>WHERE event_ts &gt; '2026-06-09'</code> instead of <code>WHERE dt = ...</code>, the engine scans the entire table — silently. Iceberg stores the partition spec as a <i>transform</i> on a real column: <code>day(event_ts)</code>, <code>bucket(16, user_id)</code>, <code>truncate(4, zipcode)</code>. The engine sees a predicate on <code>event_ts</code>, applies the transform to derive partition bounds, and prunes — the user never names a partition column because none exists in the schema. Better: the spec can change. Partition by <code>month(ts)</code> for 2024’s data, switch to <code>day(ts)</code> in 2025; old files keep their old spec, new files get the new one, and queries plan against both. Schema evolution gets the same treatment via column IDs: <code>rename</code> changes a name attached to ID 7, <code>drop</code>+<code>add</code> of the same name produces a fresh ID, so old Parquet files are read by ID and can never resurrect deleted data or mismatch on position — the classic CSV-on-Hive bug where dropping a middle column shifted every subsequent column one place to the left.</p>
+
+  <h3>Time travel, and Delta’s alternative</h3>
+  <p>Because snapshots are just rows in the metadata file pointing at immutable trees, time travel is free: <code>SELECT ... FOR VERSION AS OF 8124</code> plans against an old snapshot’s manifest list. Old snapshots are garbage-collected by an explicit <code>expire_snapshots</code> maintenance action that finds unreachable files — a reference-counting GC over the bucket. We will lean on snapshots hard in Week 8: an agent that can pin a snapshot gets a stable world to reason over, and an agent whose write is rejected by the CAS gets a clean, machine-readable conflict instead of corrupted state.</p>
+  <p>Delta Lake reaches the same destination by a different route: instead of a tree re-rooted on every commit, Delta keeps a <b>transaction log</b> — a directory <code>_delta_log/</code> of ordered JSON files (<code>000…0123.json</code>), each holding <code>add</code>/<code>remove</code> file actions plus metadata changes; commit atomicity comes from atomically creating the next-numbered log file, and readers reconstruct table state by replaying the log from the latest Parquet <b>checkpoint</b> (a compacted snapshot of the log written every ~10 commits). It’s a redo log where Iceberg is a persistent functional data structure; the trade-offs are second-order (log replay vs. tree walk, per-commit metadata size), and the formats have been converging — Delta’s checkpoints carry the same file-level statistics, and translation layers like Apache XTable expose one set of data files under both formats’ metadata.</p>
+</section>
+
+<section class="block">
+  <div class="sec-label">Lecture 2 · Thursday</div>
+  <h2>Photon and Engines Over Open Files</h2>
+
+  <p class="opener">Tuesday established that open files plus a metadata tree can behave like a table. Thursday’s question is whether they can <i>perform</i> like a warehouse — because if not, the two-tier architecture survives: a lake of cheap Parquet for ML and a proprietary warehouse for BI, with a fleet of ETL jobs shuttling data between them, each hop adding staleness, cost, and a second copy of the truth that drifts from the first. The lakehouse paper (CIDR 2021) names this two-tier world as the problem and makes a falsifiable claim: a system built on open formats in commodity object storage, with a transactional metadata layer (Lecture 1) and a sufficiently good engine, can match warehouse performance — so the warehouse’s only remaining moat, the closed storage format it can co-design with its engine, isn’t worth what it costs you in lock-in and copies. The burden of proof sits entirely on “sufficiently good engine.” Photon (SIGMOD 2022) is Databricks’ attempt to discharge it.</p>
+
+  <h3>The lakehouse argument, stated precisely</h3>
+  <p>Strip the marketing and the CIDR paper makes three technical bets. First, <b>metadata fixes ACID</b>: Delta/Iceberg-style layers give the lake transactions, time travel, and schema enforcement — covered Tuesday. Second, <b>caching and statistics fix latency</b>: hot Parquet cached on local NVMe of stateless compute nodes hides S3’s ~50–100 ms first-byte latency, and file-level zone maps fix the “scan everything” cost model. Third, <b>the format gap is closable</b>: whatever a proprietary format gains from co-design (better encodings, custom indexes), an engine over Parquet can recover through smarter execution and auxiliary data structures, because Parquet already gives you columnar layout, dictionary and RLE encodings, and per-row-group statistics — it’s roughly the same physical design warehouses use internally, standardized. Notice what the argument does <i>not</i> claim: that any single component is novel. The claim is architectural — open at every interface where lock-in used to live.</p>
+
+  <h3>Photon: evicting the JVM from the inner loop</h3>
+  <p>By 2020 Databricks had a specific bottleneck: Spark SQL’s execution layer. Spark generated Java bytecode per query (whole-stage codegen), which worked until it didn’t — the JIT bails out of methods over 8 KB of bytecode, falling back to the interpreter precisely on the widest, most complex operators; GC pauses scale with heap; and on cloud NVMe-cached NVMe-fast storage, CPU — not I/O — had become the limiting resource for typical customer queries. Photon’s answer: rewrite the execution engine in C++ as a <b>vectorized, interpreted</b> engine — columnar batches of a few thousand values flowing through precompiled operator kernels, the MonetDB/X100 design from Week 5 — rather than doing code generation in C++. The paper is candid about why: vectorization made the engine observable (a fixed set of kernels you can profile and count) and debuggable, and runtime <b>adaptivity</b> replaced compile-time specialization — kernels switch per batch based on observed data, e.g. an ASCII fast path for strings, dedicated paths for batches with no NULLs, sparse-vs-dense activity vectors after a selective filter. Photon slots in under Spark’s existing optimizer and task scheduler via JNI, consuming the same Parquet — an engine swap invisible above the operator boundary, which is itself the lakehouse thesis in microcosm: when the storage format is open, the engine is a replaceable component, and vendors compete on execution rather than on holding your data hostage.</p>
+  <p>Results, so the claim isn’t hand-waved: the SIGMOD paper reports roughly 3× average speedup over the prior Spark engine on customer workloads, up to ~11× on CPU-heavy operators like hash aggregation and string expressions, and the headline external datapoint — a 100 TB TPC-DS world-record submission in 2021, a benchmark warehouses had owned forever, run over open-format storage. Treat vendor benchmarks with Week 2’s skepticism, but the directional point stands and the rest of the industry conceded it by imitation: every major engine — Trino, DuckDB, ClickHouse, Snowflake (which added Iceberg tables), BigQuery (BigLake) — now executes vectorized over Parquet/Iceberg, and the startups (Polars, DataFusion, Velox as a reusable C++ execution library) compete inside the open-format world rather than against it.</p>
+
+  <div class="aside">
+    <span class="k">Historical aside</span>
+    There’s an irony worth savoring: Spark’s 2014 pitch was that the JVM was fine and the bottleneck was disk and network; a decade of NVMe and 100 Gb networking later, Databricks paid C++ engineers to remove the JVM from its own product’s inner loop. Hardware trends don’t argue. They invalidate.
+  </div>
+
+  <h3>The catalog wars</h3>
+  <p>Open data files created a new choke point one level up: if anyone’s engine can read the bytes, whoever controls the <i>catalog</i> — the mutable pointer from Lecture 1, plus permissions, audit, and discovery — controls the platform. Hence the 2023–24 “catalog wars,” compressed: Databricks pushed <b>Unity Catalog</b> as the governance layer for everything (tables, files, ML models), then open-sourced it under competitive pressure; Snowflake countered by launching <b>Polaris</b>, an open-source implementation of the <b>Iceberg REST catalog protocol</b> — a vendor-neutral HTTP API for the operations Lecture 1 made fundamental: resolve a table to its metadata location, and commit via conditional swap, plus namespaces and credential vending. The REST protocol is the durable artifact here, the JDBC of this era: engines program against it once, catalogs compete behind it, and the metadata pointer stops being a moat. Both companies spent 2024 buying or building toward the same conclusion (Databricks paid a reported ~$1–2B for Tabular, the Iceberg creators’ company, the week of Polaris’s announcement) — which tells you exactly where the industry believes the remaining strategic value sits. Not in the files. In the map of the files.</p>
+
+  <h3>The agent angle: the catalog is the map</h3>
+  <p>Now connect this to the course thesis. Agent frameworks increasingly skip the SQL front door entirely: a Python-tool-equipped agent calls the REST catalog, gets the metadata location and a vended credential, and reads Parquet straight into Arrow with DuckDB or Polars. There is no server enforcing semantics in that path. Everything that makes the result <i>a table</i> rather than <i>some files</i> — the snapshot it pinned, the schema with its column IDs, the partition transforms it must respect to avoid scanning a petabyte — lives in the format. When every client reads the files directly, the table format is the database, and the spec document is its source code.</p>
+  <p>And the catalog inherits the role the DBA used to play for humans. An analyst who queried the wrong <code>revenue</code> table got corrected in code review; an agent picks its table by reading catalog metadata, so a stale description or a missing deprecation flag converts directly into a confidently wrong answer. Measure it: text-to-SQL accuracy on enterprise schemas jumps dramatically when column descriptions, canonical join paths, and freshness annotations are in context — the Spider 2.0-style enterprise benchmarks put baseline accuracy below 20% largely because real catalogs are documentation deserts. Discoverability metadata used to be a librarian’s nicety. For agent clients it is load-bearing for correctness — which is why “semantic layer” quietly became the most contested feature in every catalog vendor’s roadmap.</p>
+
+  <div class="pull">When every client reads the files directly, the format <b>is</b> the database — and the catalog is the only map the agent has.</div>
+
+  <table>
+    <thead>
+      <tr><th>Property</th><th>Hive-style directories</th><th>Iceberg (metadata tree)</th><th>Delta (transaction log)</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Table definition</td><td>whatever <code>LIST</code> returns</td><td>snapshot in metadata file</td><td>log replay from checkpoint</td></tr>
+      <tr><td>Commit atomicity</td><td>none (file-at-a-time)</td><td>CAS on catalog pointer</td><td>atomic create of next log file</td></tr>
+      <tr><td>Plan cost, 1M files</td><td>~1,000 LIST calls + opens</td><td>~10s of metadata file reads</td><td>checkpoint + log tail read</td></tr>
+      <tr><td>Partition predicate</td><td>user must name <code>dt</code> column</td><td>hidden: transform on real column</td><td>generated columns (partial)</td></tr>
+      <tr><td>Schema evolution</td><td>positional; unsafe drops</td><td>column IDs; safe rename/drop</td><td>column mapping (IDs, opt-in)</td></tr>
+      <tr><td>Time travel</td><td>—</td><td>snapshot pin, O(1)</td><td>log version pin</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section class="block">
+  <div class="sec-label">Readings</div>
+  <h2>Read Before Thursday</h2>
+  <div class="reads-block">
+    <div class="read-row"><div class="n">1</div><div class="t"><i>Lakehouse: A New Generation of Open Platforms that Unify Data Warehousing and Advanced Analytics</i> — Armbrust, Ghodsi, Xin, Zaharia, CIDR 2021.<span class="v">Read it as an argument, not an ad: extract the three technical bets in §3 and decide which one carries the most risk. Note what the paper says two-tier architectures cost in staleness and copies.</span></div></div>
+    <div class="read-row"><div class="n">2</div><div class="t"><i>Apache Iceberg Table Spec, v2</i> — Apache Software Foundation; pair with Ryan Blue’s <i>“Iceberg: a fast table format for S3”</i> talk, Netflix 2018.<span class="v">Focus on the manifest and snapshot sections: find where per-column bounds live and convince yourself the commit protocol needs nothing stronger than one CAS. The talk supplies the Hive war stories the spec politely omits.</span></div></div>
+    <div class="read-row"><div class="n">3</div><div class="t"><i>Photon: A Fast Query Engine for Lakehouse Systems</i> — Behm, Palkar, Agarwal, et al., SIGMOD 2022.<span class="v">Focus on §3’s decision to vectorize-and-interpret rather than code-generate (and the JVM pathologies in §2), plus the adaptive per-batch kernels. Skim the eval with Week 2’s benchmark skepticism.</span></div></div>
+  </div>
+</section>
+
+<section class="block">
+  <div class="sec-label">Exercises</div>
+  <h2>This Week’s Problems</h2>
+  <div class="exercise">
+    <div class="ex-head">Exercise 7.1 · warm-up</div>
+    <div class="ex-body"><p>A table holds 730 daily partitions × 1,400 Parquet files each (≈1.02M files). S3: <code>LIST</code> returns 1,000 keys per call at ~30 ms; <code>GET</code> first-byte ~60 ms; metadata files as described in lecture (1 JSON root, 1 manifest list with 950 manifest entries, manifests covering ~1,100 data files each). For the query <code>WHERE event_ts BETWEEN '2026-06-01' AND '2026-06-07' AND user_id = 42</code>, compute the number of object-store operations needed to <i>plan</i> the query under (a) Hive-style listing and (b) Iceberg, assuming manifests are partition-aligned and 64-way parallel metadata reads. Then state the planning wall-clock for each. Finally: which single Iceberg statistic lets you skip data files <i>within</i> the matching week, and what data property would make it useless for <code>user_id</code>?</p></div>
+  </div>
+  <div class="exercise">
+    <div class="ex-head">Exercise 7.2 · core</div>
+    <div class="ex-body"><p>Build <code>toyberg</code>: a ~300-line table format over a local directory. Requirements: (1) immutable Parquet data files plus JSON manifests recording per-file min/max for every column; (2) a root pointer file updated only via atomic <code>rename(2)</code> of a temp file, with the expected prior version embedded so a stale writer fails; (3) <code>scan(table, predicate, version=None)</code> that prunes by manifest stats and supports time travel; (4) commit retry that re-validates: appends touching disjoint files succeed on retry, overlapping rewrites abort. Demonstrate with two concurrent writer processes racing 100 commits each — show zero lost updates and report how many retries occurred. Bonus: implement <code>expire_snapshots</code> and prove with a file census that it removes exactly the unreachable files.</p></div>
+  </div>
+  <div class="exercise">
+    <div class="ex-head">Exercise 7.3 · stretch</div>
+    <div class="ex-body"><p>Design and evaluate an <b>agent-facing catalog</b>. Take any Iceberg REST catalog (Polaris, Lakekeeper, or your 7.2 toy behind HTTP) and a schema of ≥20 tables with realistic ambiguity (e.g., three <code>revenue</code>-like tables at different grains, one deprecated). Define a metadata extension — semantic descriptions, canonical join paths, freshness SLAs, deprecation, per-column value samples — and decide <i>where it lives</i> (table properties? separate endpoint? embedded in <code>LoadTableResult</code>?) and <i>how it stays true</i> (who writes it, what CI validates it against the actual schema and snapshot history?). Then measure: run an LLM agent on 30 natural-language questions in three conditions — bare catalog, your enriched catalog, and your enriched catalog with 20% of descriptions deliberately stale — reporting accuracy and tokens consumed per condition. The third condition is the interesting one: propose and prototype one mechanism that lets the agent <i>detect</i> stale metadata rather than trust it. This is an open research problem; a negative result with a sharp analysis earns full credit.</p></div>
+  </div>
+  <div class="fleuron">❦</div>
+</section>
+
+<nav class="pager">
+  <a href="week-06.html"><span class="dir">← Week 06</span><span class="ttl">Vector Indexes Are Access Methods, Not Products</span></a>
+  <a class="next" href="week-08.html"><span class="dir">Week 08 →</span><span class="ttl">Transactions &amp; Branching for Agent Swarms</span></a>
+</nav>
+
+</main>
+
+<footer class="site">
+  <div class="inner">
+    <span>DATA 2027 — a course that doesn’t exist yet · <a href="../index.html">Essay № 01</a> · <a href="../course.html">Essay № 02</a></span>
+    <span>CC BY 4.0 · built with <a href="https://claude.com/claude-code">Claude Code</a></span>
+  </div>
+</footer>
+
+</body>
+</html>

@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Week 2: B-Trees, LSM-Trees &amp; the RUM Triangle — DATA 2027</title>
+<meta name="description" content="Why the disk shaped the B-tree, why the LSM-tree inverted it, and why every storage engine — and every agent workload — must pick a corner of the RUM triangle.">
+<meta name="theme-color" content="#f6f1e7">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23f6f1e7'/%3E%3Cellipse cx='50' cy='28' rx='30' ry='12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 28v44c0 6.6 13.4 12 30 12s30-5.4 30-12V28' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 50c0 6.6 13.4 12 30 12s30-5.4 30-12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500;9..144,600;9..144,900&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400;1,6..72,500&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="course.css">
+</head>
+<body>
+
+<div class="masthead">
+  <span><a href="index.html">DATA 2027</a> <span class="dot">●</span> DATA SYSTEMS IN THE AGENTIC ERA</span>
+  <span><a href="index.html">← SCHEDULE</a></span>
+</div>
+
+<header class="page-head">
+  <div class="kicker">Week 02 · Part I — Foundations Under New Workloads</div>
+  <h1>B-Trees, LSM-Trees &amp; the <em>RUM</em> Triangle</h1>
+  <p class="standfirst">Last week we argued the client has changed. This week we descend to the bottom of the stack to see what hasn’t: two storage architectures, three amplifications, and one triangle nobody has escaped.</p>
+  <div class="meta"><b>Lectures:</b> Tue — B-trees: the disk made me do it · Thu — LSM-trees and the amplification triangle &nbsp;·&nbsp; <b>Lab:</b> Fri — RocksDB compaction-stats autopsy</div>
+</header>
+
+<main>
+
+<section class="block">
+  <div class="objectives">
+    <div class="k">Learning objectives — after this week you can…</div>
+    <ul>
+      <li>Derive B-tree height from page size and entry width, and explain why ~250-way fanout puts a billion keys four levels deep instead of thirty.</li>
+      <li>Read a slotted-page layout and trace an insert through page splits, occupancy drift, and sibling pointers.</li>
+      <li>Explain why a steal/no-force buffer pool forces write-ahead logging, and sketch ARIES recovery in three sentences.</li>
+      <li>Define read, write, and space amplification with formulas, and compute all three for leveled and size-tiered LSM compaction.</li>
+      <li>Place a workload — including an agent-memory workload — on the RUM triangle and defend the placement quantitatively.</li>
+    </ul>
+  </div>
+</section>
+
+<section class="block">
+  <div class="sec-label">Lecture 1 · Tuesday</div>
+  <h2>B-trees: the disk made me do it</h2>
+
+  <p class="opener">Take the data structure every undergraduate reaches for — a balanced binary search tree — and put it on a disk. It dies instantly. Not because comparisons got slower; comparisons are free. It dies because storage devices do not sell you bytes, they sell you pages, and a binary tree wastes almost the entire page on every single hop. The B-tree (Bayer &amp; McCreight, 1970) is not a clever data structure. It is the <em>least</em> clever data structure that takes the page seriously, which is exactly why it has run the world’s OLTP for fifty-five years. Today we rebuild it from the constraint up; Thursday we meet the structure that took the opposite constraint just as seriously.</p>
+
+  <h3>The fanout argument, in full</h3>
+  <p>A balanced binary tree over 10⁹ keys has height log₂ 10⁹ ≈ 30. On disk, every pointer chase is a potential device read. On a 2010 spinning disk at ~10 ms a seek, that’s 300 ms per point lookup; on a modern NVMe drive at ~80 µs, it’s still ~2.4 ms — and the deeper insult is that each of those 30 reads fetched a full 4 KB page to use a 16-byte node. You consumed 0.4% of every page you paid for.</p>
+  <p>So fill the page. An interior node’s job is pure navigation: separator key plus child pointer. With an 8-byte key and an 8-byte child pointer, a 4 KB page holds 4096 / 16 = 256 entries — call it ~250-way fanout after the header. Now the height is log₂₅₀ 10⁹ = ln 10⁹ / ln 250 ≈ 20.7 / 5.5 ≈ 3.8, i.e. <strong>four levels</strong>, versus thirty. And the first three levels total 1 + 250 + 62,500 ≈ 63 k pages ≈ 250 MB — small enough to pin in memory permanently, so a point lookup costs <strong>one</strong> device read: the leaf. That is the entire theory of the B-tree in one sentence: since the device forces you to read a page, make every byte of that page advance the search.</p>
+  <p>Notice what the math is sensitive to: page size barely matters (heights are logarithms, and logarithms are stubborn), but key width matters a lot. Fatten the key from 8 bytes to a 36-character string and you’ve cut fanout by 3× — which is why serious engines do prefix truncation in interior nodes: a separator needn’t be a real key, only a string that sorts between two leaves.</p>
+
+  <h3>Anatomy of a page: the slotted layout</h3>
+  <p>Inside a page, real records are variable-length, so you can’t just array-index them. The universal answer is the <strong>slotted page</strong>: a small header, then a slot array growing forward from the front, then the records (“cells”) growing backward from the end, with free space in the middle. Each slot is a 2–4 byte offset into the page. The slots are kept in key order even though the cells are in arrival order, so binary search runs over the slot array without ever moving a record. Deletion just marks a slot dead; the page compacts itself lazily when free space fragments.</p>
+  <p>The slot array is also an indirection layer with consequences beyond one page: a record’s external identity is (page #, slot #), so the engine may shuffle cells within the page without invalidating a single secondary-index entry pointing at it. Every row update that changes the row’s size and survives is this two-level indirection earning its keep.</p>
+
+  <h3>Splits, merges, and the 69% equilibrium</h3>
+  <p>Insert into a full leaf and the leaf splits: half the entries move to a new page, and the separator key is pushed into the parent — which may itself split, all the way up. The tree grows only at the root, which is the B-tree’s quiet masterpiece: balance is a side effect of the growth rule, with no rotations and no rebalancing pass, ever.</p>
+  <p>Splitting at the midpoint leaves both pages half full, and under uniformly random inserts the steady-state page occupancy converges to ln 2 ≈ <strong>69%</strong> — a number worth memorizing, because it is a permanent ~1.44× space tax the B-tree pays for being update-friendly. Engines cheat where they can: for monotonically increasing keys, splitting at the insertion point instead of the midpoint yields ~100%-full left pages. Deletion is the embarrassing part: textbooks merge pages below half full; production engines mostly don’t, because merging under concurrency is misery. They let pages drift sparse and clean up offline (<code>VACUUM</code>, <code>OPTIMIZE TABLE</code>) — which is why a table that grew to 100 GB and shrank to 10 GB of live data is still 100 GB on disk until you say otherwise.</p>
+  <p>Two refinements complete the modern picture. The <strong>B+-tree</strong> puts all records in the leaves, keeps interior nodes navigation-only, and chains the leaves with <strong>sibling pointers</strong> — a range scan descends once and walks right, never re-entering the tree. And the Lehman–Yao <strong>B-link</strong> variant gives each node a high key and a right-link, so a reader racing an in-flight split detects “my key is past this node’s high key” and follows the link — concurrency without lock-coupling. PostgreSQL’s nbtree is a B-link tree; this is not an academic flourish.</p>
+
+  <div class="aside">
+    <span class="k">Field note</span>
+    A team I knew shipped a write-heavy service with random UUIDv4 primary keys on InnoDB. Every insert landed on a uniformly random leaf, dirtying a cold page: the buffer pool thrashed, checkpoints fell behind, throughput collapsed at a few thousand rows/s on hardware good for ten times that. Switching to time-sortable IDs (UUIDv7/ULID) confined inserts to the tree’s right edge — hot pages stayed hot, throughput tripled, nothing in the schema changed. The <em>key distribution</em> is part of your storage engine whether you admit it or not.
+  </div>
+
+  <h3>WAL, the buffer pool, and steal/no-force</h3>
+  <p>B-tree writes are in-place writes, and in-place writes have a crash problem. Pages are modified in the buffer pool, not on disk, so the engine faces two policy questions: may the pool evict a dirty page of an <em>uncommitted</em> transaction (<strong>steal</strong>)? Must commit flush every page the transaction dirtied (<strong>force</strong>)? Every serious engine answers <strong>steal / no-force</strong>, decoupling eviction policy from commit latency. The price: after a crash, the disk may contain uncommitted changes and may be missing committed ones. The write-ahead log covers both with two rules: no dirty page reaches disk before the log records describing its changes are durable (enabling <em>undo</em>), and commit doesn’t return before the commit record is durable (enabling <em>redo</em>). Note what got bought: commit costs one sequential log append instead of a spray of random page writes.</p>
+  <p>ARIES, in one paragraph, since you will meet it everywhere: every log record gets a monotonically increasing LSN, and every page is stamped with the LSN of the last record applied to it, which makes redo idempotent — replay a record only if the page’s LSN is older. Recovery runs three passes: <em>analysis</em> reconstructs which transactions were live at the crash from a fuzzy checkpoint; <em>redo</em> repeats history exactly — including the losers — to restore the precise crash-moment state; <em>undo</em> then rolls the losers back, writing compensation log records (CLRs) so that a crash <em>during recovery</em> never undoes the same change twice. Fuzzy checkpoints mean the system never stalls to snapshot. Keep one contrast in your pocket for Thursday: ARIES is this elaborate because B-trees mutate pages in place. A structure that never overwrites anything gets to throw half this machinery away.</p>
+</section>
+
+<section class="block">
+  <div class="sec-label">Lecture 2 · Thursday</div>
+  <h2>LSM-trees and the amplification triangle</h2>
+
+  <p class="opener">Now invert every assumption. Suppose your workload is not “read a customer row, update a balance” but “ingest a firehose, occasionally look things up.” The B-tree’s in-place discipline becomes pure liability: every insert is a random page write, every random write is a buffer-pool eviction fight. O’Neil, Cheng, Gawlick &amp; O’Neil asked in 1996: what if we never update in place at all? Buffer writes in memory, dump them to disk as immutable sorted runs, and pay a background process to merge the runs. That is the log-structured merge-tree, and today it sits under RocksDB, Cassandra, HBase — and under most of the memory stores being sold to agent builders right now, which is why you must be able to audit its costs.</p>
+
+  <h3>Outrunning the disk: memtables and SSTables</h3>
+  <p>The write path: append the operation to a WAL (sequential, cheap), insert it into the <strong>memtable</strong> — an in-memory sorted structure, typically a skiplist. When the memtable hits a threshold (~64 MB in RocksDB), freeze it and write it out as an <strong>SSTable</strong>: an immutable file of sorted key–value pairs with a block index, min/max key metadata, and a Bloom filter. One sequential write, no page in the tree is ever touched, and the file is never modified again. Updates are simply newer versions; deletes are <strong>tombstones</strong> — a special “this key is dead” record that must survive until compaction has provably buried every older version below it.</p>
+  <p>The read path is where the bill arrives: check the memtable, then each SSTable newest to oldest, because the newest version wins. Untreated, a point lookup costs one block read per run the key <em>might</em> be in. Everything else in this lecture — compaction policy, Bloom filters, the RUM triangle — is about managing that bill.</p>
+
+  <h3>Compaction: leveled vs. size-tiered</h3>
+  <p><strong>Size-tiered</strong> compaction (Cassandra’s historical default) waits until ~4 runs of similar size accumulate, then merges them into one run of the next tier. Each byte is rewritten only about once per tier — roughly log₄(N) times in its life — so write amplification is low. But runs within and across tiers overlap freely in key range, so a key may live in many runs (high read amplification) and a hot, repeatedly updated key can have stale versions in <em>every</em> tier; transient space amplification of 2× during a big merge is routine.</p>
+  <p><strong>Leveled</strong> compaction (LevelDB, RocksDB default) imposes order: levels L1…Ln, each T = 10× larger than the last, and within a level the SSTables are <em>non-overlapping</em> — together they form one giant sorted run. Compaction picks a file from Lᵢ and merges it with the ~T overlapping files in Lᵢ₊₁. Consequence one: at most one version of any key per level, so reads probe at most one file per level and space amplification collapses to ≈ 1 + 1/T ≈ 1.11 (only the not-yet-compacted top is duplicated). Consequence two: every byte that descends into Lᵢ₊₁ drags ~T bytes of rewrite with it. You just bought reads and space with writes.</p>
+
+  <h3>The amplification ledger</h3>
+  <p>Define the three numbers precisely, because vendors won’t. <strong>Write amplification</strong> WA = bytes physically written to the device ÷ bytes logically written by the client. <strong>Read amplification</strong> RA = device reads performed per query ÷ reads the query logically needed (for a point lookup: how many block reads to find one key). <strong>Space amplification</strong> SA = bytes occupied on the device ÷ bytes of live, unique data.</p>
+  <p>Worked example — RocksDB, leveled, T = 10, four levels below L0, dataset 640 GB. Follow one user byte: written once to the WAL, once when the memtable flushes, then on each descent Lᵢ → Lᵢ₊₁ it joins a merge that rewrites ~T bytes of the level below per byte arriving. Total: WA ≈ 1 + 1 + 10×4 = <strong>42</strong> — the folklore “~10× per level, 40–50× overall” is just this sum. Before you gasp, audit the B-tree the same way: updating a 128-byte row dirties a 4 KB leaf, and with full-page writes in the WAL that’s 8 KB written for 128 bytes — WA = 64. The LSM’s sin is not that it amplifies more; often it amplifies <em>less</em>, and sequentially. The sin is that the cost is deferred, bursty, and easy to ignore until compaction debt eats your p99. Run the same dataset size-tiered with 4-run tiers and ~3 tiers: WA ≈ 1 + 1 + 3 = 5 — eight times less device wear — but a point read must consider up to ~12 overlapping runs, and SA can transiently hit 2×.</p>
+  <p>The numbers are not hypothetical; RocksDB prints the ledger on demand:</p>
+  <pre><code>** Compaction Stats [default] **
+Level   Files  Size(GB)  Read(GB)  Write(GB)  W-Amp
+  L0     4/0      0.25       0.0       62.1    1.0
+  L1    10/1      0.62     601.7      598.9    9.6
+  L2    98/3      6.21     580.4      577.8    9.3
+  L3   940/8     62.05     551.2      549.0    8.9
+ Sum                      1733.3     1787.8   28.8</code></pre>
+  <p>Friday’s lab is an autopsy of exactly this table from a live ingest run: you will predict the W-Amp column from T and the level count before you run it, then explain every deviation.</p>
+
+  <h3>Bloom filters: buying back the reads</h3>
+  <p>The read bill gets paid down with a probabilistic IOU. Each SSTable carries a <strong>Bloom filter</strong>: m bits, k hash functions; inserting a key sets k bits, querying checks them. False positives only — the filter can say “maybe here” wrongly, never “not here” wrongly — with rate FPR ≈ (1 − e^(−kn/m))^k, minimized at k = (m/n)·ln 2. The engineering point: at the standard 10 bits per key, k = 7 and FPR ≈ 0.8%. A point lookup now reads, in expectation, ≈ 1 + 0.008 × (runs − 1) blocks — size-tiered’s twelve-run nightmare collapses to ~1.1 reads. Ten bits per key is the best deal in systems.</p>
+  <p>But mark the limitation, because it returns with force in week 6: a Bloom filter answers “is key X in this file?” It cannot answer “does anything in [a, b) live here?” — so <strong>range scans get no help</strong> and must consult every overlapping run. And a semantic query — “memories similar to this embedding” — isn’t even a range. There is no Bloom filter for meaning. Hold that thought.</p>
+
+  <h3>The RUM conjecture — and the corner agents sit on</h3>
+  <p>Athanassoulis et al. (EDBT 2016) named the pattern you’ve now seen three times. Every access method has a <strong>R</strong>ead overhead, an <strong>U</strong>pdate overhead, and a <strong>M</strong>emory (space) overhead, and the conjecture states: optimizing any two toward their minimum forces the third away from its minimum. The B-tree takes reads (giving up update locality and 31% of its space). Leveled LSM takes space and decent reads (paying 40× writes). Size-tiered takes updates (paying reads and space). A hash index takes point reads and space (surrendering ranges entirely). It is a conjecture, not a theorem — the frontier has never been formally bounded — but in thirty years of access-method design, nobody has bought all three corners.</p>
+
+  <figure>
+    <svg viewBox="0 0 800 360" role="img" aria-label="The RUM triangle with B-tree, leveled LSM, size-tiered LSM, and the agent workload pulled between two corners">
+      <rect x="0" y="0" width="800" height="360" fill="#efe8d8"/>
+      <path d="M400 52 C 310 134, 218 222, 124 306" fill="none" stroke="#1d1a15" stroke-width="2.5" stroke-linecap="round"/>
+      <path d="M400 52 C 492 136, 584 220, 678 302" fill="none" stroke="#1d1a15" stroke-width="2.5" stroke-linecap="round"/>
+      <path d="M124 306 C 308 300, 494 304, 678 302" fill="none" stroke="#1d1a15" stroke-width="2.5" stroke-linecap="round"/>
+      <text x="400" y="34" text-anchor="middle" font-family="monospace" font-size="15" fill="#93321b">READ-OPTIMIZED</text>
+      <text x="118" y="332" text-anchor="start" font-family="monospace" font-size="15" fill="#93321b">WRITE-OPTIMIZED</text>
+      <text x="682" y="328" text-anchor="end" font-family="monospace" font-size="15" fill="#93321b">SPACE-OPTIMIZED</text>
+      <circle cx="412" cy="118" r="6" fill="#93321b"/>
+      <text x="430" y="123" font-family="monospace" font-size="13" fill="#1d1a15">b+tree (1 I/O reads, 69% pages)</text>
+      <circle cx="488" cy="240" r="6" fill="#93321b"/>
+      <text x="504" y="245" font-family="monospace" font-size="13" fill="#1d1a15">lsm, leveled (sa~1.1, wa~40)</text>
+      <circle cx="208" cy="276" r="6" fill="#93321b"/>
+      <text x="224" y="281" font-family="monospace" font-size="13" fill="#1d1a15">lsm, size-tiered (wa~5)</text>
+      <circle cx="330" cy="196" r="7" fill="none" stroke="#93321b" stroke-width="2.5" stroke-dasharray="3 3"/>
+      <text x="348" y="188" font-family="monospace" font-size="13" fill="#93321b">agent memory: wants R and U,</text>
+      <text x="348" y="206" font-family="monospace" font-size="13" fill="#93321b">never deletes. awkward.</text>
+      <path d="M330 184 C 348 156, 372 110, 392 66" fill="none" stroke="#93321b" stroke-width="1.8" stroke-dasharray="6 5"/>
+      <path d="M392 66 l-10 4 m10 -4 l-2 11" fill="none" stroke="#93321b" stroke-width="1.8" stroke-linecap="round"/>
+      <path d="M318 204 C 268 234, 196 270, 142 298" fill="none" stroke="#93321b" stroke-width="1.8" stroke-dasharray="6 5"/>
+      <path d="M142 298 l11 -1 m-11 1 l8 -8" fill="none" stroke="#93321b" stroke-width="1.8" stroke-linecap="round"/>
+    </svg>
+    <figcaption>Fig. 2.1 — The RUM triangle (after Athanassoulis et al., EDBT 2016). Each engine buys two corners and bills the third. The agent-memory workload is pulled toward the read and write corners simultaneously while its space requirement grows monotonically — and week 6 will add a fourth, off-plane axis: recall.</figcaption>
+  </figure>
+
+  <p>Now place this course’s protagonist on the triangle. An agent fleet’s memory system ingests at machine speed: every step appends observations, tool outputs, reflections, embeddings — millions of small writes per hour, essentially never updated in place. That is the write corner; LSM territory; the easy half. But before nearly every action, the agent runs <em>recall</em>: semantic search over its entire accumulated history — read-heavy, scan-shaped, top-k with no exact key, so Bloom filters are spectators. And agents, unlike users, almost never delete: memory is the product, so live data grows monotonically. The agent workload sits on an awkward corner — write-heavy at ingest, read-heavy at recall, space-hungry forever — and the conjecture says it cannot have all three cheaply. Most “AI memory” products are an LSM with a vector index bolted on: they have silently chosen U and are paying for R at query time. Week 6 makes this precise by adding the axis RUM omits — <strong>recall</strong>: when reads are approximate, you trade R, U, and M against answer <em>quality</em>, and the triangle becomes a tetrahedron.</p>
+
+  <div class="pull">You don’t choose whether to amplify. You choose <b>which</b> amplification to confess to — and the workload audits you.</div>
+
+  <div class="aside">
+    <span class="k">Historical aside</span>
+    The LSM paper landed in 1996 to near-total silence and waited a decade: Bigtable (2006) rebuilt the idea at Google scale, LevelDB (2011) shrank it to a library, and Meta’s RocksDB fork turned it into infrastructure — MyRocks cut Facebook’s MySQL storage roughly in half versus InnoDB, a space-amplification argument, not a speed one. The LSM wasn’t wrong in 1996; the hardware economics were. It needed flash — cheap sequential bandwidth, costly random writes, finite endurance — to become inevitable. When you meet a “premature” design this semester, ask what hardware bill it is waiting for.
+  </div>
+
+  <p>The week’s scorecard, in one table — memorize the shape, not the digits:</p>
+  <table>
+    <thead>
+      <tr><th>Dimension</th><th>B+-tree (in-place)</th><th>LSM — leveled</th><th>LSM — size-tiered</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>Write amp</strong></td><td>page/record ratio: ~30–60× per small update, random I/O</td><td>~T per level; ≈ 40–50× at T=10, 4 levels — but sequential</td><td>~1× per tier; ≈ 5× total — sequential</td></tr>
+      <tr><td><strong>Point-read amp</strong></td><td>1 I/O (upper levels cached)</td><td>≤ 1 file/level; ≈ 1 I/O with Bloom filters (10 bits/key, FPR 0.8%)</td><td>up to runs-per-tier × tiers candidates; ≈ 1.1 I/O with filters</td></tr>
+      <tr><td><strong>Range scans</strong></td><td>excellent — descend once, walk sibling pointers</td><td>good — merge ~1 iterator per level; no Bloom help</td><td>poor — merge every overlapping run; no Bloom help</td></tr>
+      <tr><td><strong>Space amp</strong></td><td>~1.44× (ln 2 occupancy) + non-merging deletes</td><td>≈ 1 + 1/T ≈ 1.1×, tombstones transient</td><td>up to ~2× transient; stale versions linger across tiers</td></tr>
+      <tr><td><strong>Concurrency</strong></td><td>latching + lock coupling; B-link eases readers; hot-page contention on right-edge inserts</td><td colspan="2">immutable SSTables: readers never block writers; cost moves to compaction scheduling and write stalls</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section class="block">
+  <div class="sec-label">Readings</div>
+  <h2>Read Before Thursday</h2>
+  <div class="reads-block">
+    <div class="read-row"><div class="n">1</div><div class="t"><i>Database Internals</i>, ch. 2–4 &amp; 7 — Alex Petrov, O’Reilly 2019.<span class="v">Ch. 2–4 give you the B-tree at implementation depth (cell layouts, splits, B-link); ch. 7 is the cleanest LSM treatment in print. Read with a pencil; redo the fanout math for 16 KB pages.</span></div></div>
+    <div class="read-row"><div class="n">2</div><div class="t"><i>Designing Access Methods: The RUM Conjecture</i> — Athanassoulis, Kester, Maas, Stoica, Idreos, Ailamaki, Callaghan, EDBT 2016.<span class="v">Short and sharp. Focus on the overhead definitions in §2 and the design-space figure; come to class able to say which corner the last system you used had silently chosen.</span></div></div>
+    <div class="read-row"><div class="n">3</div><div class="t"><i>The Log-Structured Merge-Tree (LSM-Tree)</i> — O’Neil, Cheng, Gawlick &amp; O’Neil, Acta Informatica 1996.<span class="v">Read §1–3 for the rolling-merge idea; skim the rest. The cost model is HDD-era — your job is to notice exactly which assumptions flash and NVMe broke, and which survived.</span></div></div>
+  </div>
+</section>
+
+<section class="block">
+  <div class="sec-label">Exercises</div>
+  <h2>This Week’s Problems</h2>
+  <div class="exercise">
+    <div class="ex-head">Exercise 2.1 · warm-up</div>
+    <div class="ex-body"><p>InnoDB uses 16 KB pages. Assume interior entries cost 20 bytes (8-byte key, 6-byte page pointer, 6 bytes overhead). Compute the fanout, the tree height for 10¹⁰ rows, and the I/Os per point lookup if the top two levels are cached. How much RAM does caching all <em>interior</em> levels require? Now repeat with 16-byte UUIDv4 keys (28-byte entries) and write two sentences on why your DBA keeps muttering about surrogate keys.</p></div>
+  </div>
+  <div class="exercise">
+    <div class="ex-head">Exercise 2.2 · core</div>
+    <div class="ex-body"><p>An agent fleet writes 200 GB/day of new memories into a store that grows toward 6 TB. (a) Under leveled compaction with T = 10 and four levels below L0, estimate total device writes per day, including WAL and flush. (b) Your drive is a 7.68 TB SSD rated 3 DWPD over five years. Does the workload fit? With what headroom? (c) Redo the estimate for size-tiered compaction with 4-run tiers and 3 tiers. (d) Each SSTable has a 10-bits-per-key Bloom filter (FPR ≈ 0.8%). Compute the expected block reads per point lookup under both policies, assuming 5 candidate files (leveled) vs. 12 overlapping runs (size-tiered). (e) The recall path is a range-shaped scan over the newest 30 days of memories: which policy wins now, and why do the Bloom filters not appear in your answer?</p></div>
+  </div>
+  <div class="exercise">
+    <div class="ex-head">Exercise 2.3 · stretch</div>
+    <div class="ex-body"><p>Design a storage engine for agent memory with this workload: append-only writes (no in-place updates, no deletes); exact reads with strong recency skew (80% of point lookups hit the newest 5% of data); a weekly full-corpus scan to rebuild embeddings; and a monthly “consolidation” pass in which an LLM rewrites cold memories into summaries one-tenth the size. Specify your layout (you may hybridize: e.g., leveled hot levels over a time-partitioned, compressed, size-tiered cold store), derive WA/RA/SA bounds for each component as functions of your design parameters, and argue your engine’s position on the RUM triangle. Then take a position on the hard question: consolidation destroys information to save space — is it just semantic compaction, and if so, what is its amplification metric? Propose one, with units, and defend it. Optionally, prototype the hot path with RocksDB column families (leveled hot, FIFO cold) under <code>db_bench</code>, and report predicted vs. measured write amplification with an explanation of every deviation above 15%.</p></div>
+  </div>
+  <div class="fleuron">❦</div>
+</section>
+
+<nav class="pager">
+  <a href="week-01.html"><span class="dir">← Week 01</span><span class="ttl">The Client Has Changed</span></a>
+  <a class="next" href="week-03.html"><span class="dir">Week 03 →</span><span class="ttl">One Size Fits None</span></a>
+</nav>
+
+</main>
+
+<footer class="site">
+  <div class="inner">
+    <span>DATA 2027 — a course that doesn’t exist yet · <a href="../index.html">Essay № 01</a> · <a href="../course.html">Essay № 02</a></span>
+    <span>CC BY 4.0 · built with <a href="https://claude.com/claude-code">Claude Code</a></span>
+  </div>
+</footer>
+
+</body>
+</html>
