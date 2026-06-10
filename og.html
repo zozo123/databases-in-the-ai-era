@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>og card source</title>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,900&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; background: #f6f1e7; }
+  body { display: flex; align-items: center; justify-content: center; }
+  .card {
+    width: 1200px; height: 630px; background: #f6f1e7; position: relative;
+    padding: 64px 72px; display: flex; flex-direction: column; justify-content: space-between;
+    background-image: radial-gradient(ellipse at 85% -10%, rgba(184,64,31,.07), transparent 55%);
+  }
+  .top { display: flex; justify-content: space-between; align-items: baseline;
+    font-family: 'IBM Plex Mono', monospace; font-size: 17px; letter-spacing: .16em; color: #837b6c; }
+  .top .dot { color: #93321b; }
+  h1 { font-family: 'Fraunces', serif; font-weight: 900; font-size: 108px; line-height: .95;
+    letter-spacing: -.022em; color: #1d1a15; }
+  h1 em { font-style: italic; font-weight: 300; color: #93321b; }
+  .bottom { display: flex; justify-content: space-between; align-items: flex-end; }
+  .sub { font-family: 'IBM Plex Mono', monospace; font-size: 19px; line-height: 1.7; color: #4a443a; letter-spacing: .02em; }
+  .sub b { color: #93321b; }
+  .rule { position: absolute; left: 72px; right: 72px; top: 132px; height: 1px; background: #1d1a15; }
+  svg.db { width: 110px; height: 110px; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="top"><span>TMP&nbsp;PRESS <span class="dot">●</span> ESSAYS + OPEN COURSEWARE</span><span>2026</span></div>
+    <div class="rule"></div>
+    <h1>Databases in<br>the <em>Age of AI</em></h1>
+    <div class="bottom">
+      <div class="sub">two essays · <b>DATA 2027</b>: a full graduate course<br>14 weeks · 423 slides · 4 labs with tested starter code</div>
+      <svg class="db" viewBox="0 0 100 100"><ellipse cx="50" cy="24" rx="32" ry="13" fill="none" stroke="#93321b" stroke-width="6"/><path d="M18 24v50c0 7.2 14.3 13 32 13s32-5.8 32-13V24" fill="none" stroke="#93321b" stroke-width="6"/><path d="M18 49c0 7.2 14.3 13 32 13s32-5.8 32-13" fill="none" stroke="#93321b" stroke-width="6"/></svg>
+    </div>
+  </div>
+</body>
+</html>
