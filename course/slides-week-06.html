@@ -50,7 +50,7 @@
   <div class="body">
     <ul>
       <li>N = 100M vectors, d = 768 floats: <b>307 GB</b> raw.</li>
-      <li>One exact query: 100M dot products ≈ <b>77 GFLOPs</b>.</li>
+      <li>One exact query: 100M dot products ≈ <b>154 GFLOPs</b> (77B multiply-adds).</li>
       <li>At ~50 GB/s bandwidth: <b>six seconds per query</b>.</li>
       <li>Before you’ve served a second user.</li>
     </ul>
@@ -226,7 +226,7 @@
       <li>Each node links to ~M near neighbors (M = 16–32).</li>
       <li><b>Navigability</b>: diversity heuristic keeps long-range highways, not M redundant short edges.</li>
       <li><b>Hierarchy</b>: layer drawn geometrically, P(layer ≥ ℓ) = e<sup>−ℓ/m<sub>L</sub></sup>.</li>
-      <li>Each layer up has ~1/e the nodes — coarse hops first.</li>
+      <li>Each layer up has ~1/M the nodes — coarse hops first.</li>
       <li>Expected logarithmic search depth survives. Malkov &amp; Yashunin, TPAMI 2018.</li>
     </ul>
   </div>
