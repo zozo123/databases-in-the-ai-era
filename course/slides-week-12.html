@@ -200,7 +200,8 @@
     <ul>
       <li>Anthropic’s 2024 reference server: small, “read-only,” a teaching artifact.</li>
       <li>2025: Datadog Security Labs finds <b>SQL injection</b>.</li>
-      <li>The query tool string-interpolated the model-supplied argument.</li>
+      <li>The query tool ran the whole model-supplied SQL inside <code>BEGIN TRANSACTION READ ONLY</code> — not argument interpolation.</li>
+      <li>Node <code>pg</code> allows stacked statements: <code>COMMIT; DROP SCHEMA public CASCADE;</code> ended the read-only txn and ran destructive SQL with full privileges.</li>
       <li>Role and statement handling didn’t actually constrain reach.</li>
       <li>Server deprecated; the repo now points to hardened alternatives.</li>
     </ul>

@@ -347,7 +347,7 @@
       <li><b>Cold start:</b> the empty hint set <em>is</em> PostgreSQL — day one = status quo.</li>
       <li><b>Drift:</b> a 48-way choice retrains in minutes on one GPU.</li>
       <li>Cuts tail (p99) latencies substantially; reduces cloud cost.</li>
-      <li>Shipped in spirit: Microsoft’s Auto-Steer, follow-ons at Meta.</li>
+      <li>Shipped in spirit: Microsoft’s steered optimizer (SCOPE), Meta’s AutoSteer (PrestoDB).</li>
     </ul>
   </div>
 </section>
@@ -363,8 +363,8 @@
       </thead>
       <tbody>
         <tr><td><b>Neo</b> (VLDB ’19)</td><td>Replaces the optimizer</td><td>Arbitrarily bad plan</td><td>Influential; never deployed as-is</td></tr>
-        <tr><td><b>Bao</b> (SIGMOD ’21)</td><td>Advises: 1 of 48 hint sets</td><td>A valid classical plan</td><td>Pattern adopted (Auto-Steer &amp; kin)</td></tr>
-        <tr><td><b>OtterTune</b> (’17–’23)</td><td>Outside, tuning knobs</td><td>Bad config (recoverable)</td><td>Good tech, dead company (2023)</td></tr>
+        <tr><td><b>Bao</b> (SIGMOD ’21)</td><td>Advises: 1 of 48 hint sets</td><td>A valid classical plan</td><td>Pattern adopted (MSFT steered optimizer, Meta AutoSteer &amp; kin)</td></tr>
+        <tr><td><b>OtterTune</b> (’17–’24)</td><td>Outside, tuning knobs</td><td>Bad config (recoverable)</td><td>Good tech, dead company (2024)</td></tr>
         <tr><td><b>LLM-DBA via MCP</b></td><td>Outside, as a client</td><td>Whatever you let it execute</td><td>The current frontier</td></tr>
       </tbody>
     </table>
