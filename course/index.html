@@ -4,15 +4,37 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>DATA 2027: Data Systems in the Agentic Era — Course Home</title>
-<meta name="description" content="A complete, free graduate database course for the agentic era: 14 weeks of lecture notes, 4 systems labs, final projects, and a synthesis exam. The course MIT, Stanford, and Harvard don't teach yet.">
+<meta name="description" content="Open course materials for a graduate data-systems course in the agentic era: 14 weeks of notes, 4 tested labs, projects and an exam. Drafted with AI agents; not yet taught.">
+<meta name="author" content="Yossi Eliaz">
 <meta property="og:title" content="DATA 2027: Data Systems in the Agentic Era">
 <meta property="og:description" content="14 weeks of lecture notes · 4 systems labs · 8 final projects · a synthesis exam. Free, open, CC BY.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://zozo123.github.io/databases-in-the-ai-era/course/">
 <meta property="og:image" content="https://zozo123.github.io/databases-in-the-ai-era/og.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="theme-color" content="#f6f1e7">
 <link rel="canonical" href="https://zozo123.github.io/databases-in-the-ai-era/course/">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Course",
+  "name": "DATA 2027: Data Systems in the Agentic Era",
+  "description": "Open course materials drafted with AI agents; not yet taught.",
+  "url": "https://zozo123.github.io/databases-in-the-ai-era/course/",
+  "image": "https://zozo123.github.io/databases-in-the-ai-era/og.png",
+  "inLanguage": "en",
+  "isAccessibleForFree": true,
+  "license": "https://creativecommons.org/licenses/by/4.0/",
+  "author": {
+    "@type": "Person",
+    "name": "Yossi Eliaz",
+    "url": "https://yossieliaz.netlify.app/",
+    "sameAs": ["https://github.com/zozo123", "https://www.linkedin.com/in/yossi-eliaz/"]
+  }
+}
+</script>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23f6f1e7'/%3E%3Cellipse cx='50' cy='28' rx='30' ry='12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 28v44c0 6.6 13.4 12 30 12s30-5.4 30-12V28' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 50c0 6.6 13.4 12 30 12s30-5.4 30-12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -33,6 +55,10 @@
   .sched-row .tt { font-family: var(--display); font-weight: 600; font-size: 19px; line-height: 1.25; }
   .sched-row .tt span { display: block; font-family: var(--serif); font-weight: 400; font-size: 14.5px; color: var(--ink-soft); margin-top: 3px; }
   .sched-row .tag { font-family: var(--mono); font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--ox); text-align: right; padding-top: 4px; }
+  @media (max-width: 600px) {
+    .sched-row { grid-template-columns: 44px minmax(0,1fr); gap: 4px 12px; }
+    .sched-row .dt, .sched-row .tt, .sched-row .tag { grid-column: 2; text-align: left; }
+  }
   .part-bar {
     font-family: var(--mono); font-size: 11px; letter-spacing: .2em; text-transform: uppercase;
     color: var(--paper); background: var(--ink); padding: 9px 16px; margin-top: 18px;
@@ -61,12 +87,12 @@
 </div>
 
 <header class="page-head">
-  <div class="kicker">MIT 6.5837 · Stanford CS 345A · Harvard CS 2650</div>
+  <div class="kicker">An independent course design by Yossi Eliaz · not offered at any university</div>
   <h1>Data Systems in the <em>Agentic</em> Era</h1>
   <p class="standfirst">A complete graduate database course for CS students — 14 weeks of full lecture notes, four systems labs, eight final projects, and a synthesis exam. Free, open, and built on one thesis: <strong>the database’s dominant client is now a model, and that changes the workload at every layer of the stack — but not the physics.</strong></p>
   <div class="meta">
     <b>Units:</b> 12 (3-0-9) &nbsp;·&nbsp; <b>Meets:</b> Tu/Th 1:00–2:30 + Fri lab &nbsp;·&nbsp; <b>Prereqs:</b> undergrad DB internals, systems programming (Rust/C++/Go), LLM API fluency<br>
-    <b>Everything on this site is real coursework; only the registrar entry is fictional.</b> Steal freely — CC BY 4.0.
+    <b>Course materials drafted with AI research agents and machine-tested; not yet taught in a classroom. Review before teaching.</b> CC BY 4.0.
   </div>
 </header>
 
@@ -151,7 +177,7 @@
 <footer class="site">
   <div class="inner">
     <span>DATA 2027 · companion to <a href="../index.html">Essay № 01: Databases in the Age of AI</a> and <a href="../course.html">Essay № 02: The 2027 Syllabus</a></span>
-    <span>CC BY 4.0 · built with <a href="https://claude.com/claude-code">Claude Code</a></span>
+    <span>By <a href="https://zozo123.github.io/">Yossi Eliaz</a> · CC BY 4.0 · built with <a href="https://claude.com/claude-code">Claude Code</a></span>
   </div>
 </footer>
 

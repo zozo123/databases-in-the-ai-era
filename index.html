@@ -3,17 +3,39 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Databases in the Age of AI — An Essay</title>
-<meta name="description" content="What happens to the fifty-year-old discipline of database systems when the dominant reader of data is no longer human. An essay on storage engines, semantic layers, catalogs, and the agentic decade ahead.">
+<title>Databases in the Age of AI · Essay by Yossi Eliaz</title>
+<meta name="description" content="Essay by Yossi Eliaz (June 2026): what database systems must change when AI agents, not people, are the main readers of data.">
+<meta name="author" content="Yossi Eliaz">
 <meta property="og:title" content="Databases in the Age of AI">
 <meta property="og:description" content="The reader changes. The physics doesn't. An essay on what agents do to databases — and what databases must do back.">
 <meta property="og:type" content="article">
+<meta property="og:url" content="https://zozo123.github.io/databases-in-the-ai-era/">
 <meta property="og:image" content="https://zozo123.github.io/databases-in-the-ai-era/og.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="theme-color" content="#f6f1e7">
 <link rel="canonical" href="https://zozo123.github.io/databases-in-the-ai-era/">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Article",
+  "headline": "Databases in the Age of AI",
+  "description": "Essay on what database systems must change when AI agents, not people, are the main readers of data.",
+  "url": "https://zozo123.github.io/databases-in-the-ai-era/",
+  "mainEntityOfPage": "https://zozo123.github.io/databases-in-the-ai-era/",
+  "image": "https://zozo123.github.io/databases-in-the-ai-era/og.png",
+  "datePublished": "2026-06-10",
+  "inLanguage": "en",
+  "license": "https://creativecommons.org/licenses/by/4.0/",
+  "author": {
+    "@type": "Person",
+    "name": "Yossi Eliaz",
+    "url": "https://yossieliaz.netlify.app/",
+    "sameAs": ["https://github.com/zozo123", "https://www.linkedin.com/in/yossi-eliaz/"]
+  }
+}
+</script>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23f6f1e7'/%3E%3Cellipse cx='50' cy='28' rx='30' ry='12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 28v44c0 6.6 13.4 12 30 12s30-5.4 30-12V28' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 50c0 6.6 13.4 12 30 12s30-5.4 30-12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -59,6 +81,8 @@
     text-transform: uppercase; color: var(--ink-faint);
   }
   .masthead .dot { color: var(--ox); }
+  .masthead a { color: inherit; text-decoration: none; }
+  @media (max-width: 600px) { .masthead { flex-direction: column; gap: .4rem; } }
 
   /* ---------- hero ---------- */
   .hero {
@@ -98,6 +122,16 @@
   @media (max-width: 760px) {
     .hero .standfirst { grid-template-columns: 1fr; }
     .standfirst .meta { text-align: left; }
+  }
+  .hero .byline {
+    margin-top: 34px; font-family: var(--mono); font-size: 13px; letter-spacing: .04em;
+    color: var(--ink-soft);
+  }
+  .hero .byline a { color: var(--ox); text-decoration: none; border-bottom: 1px solid rgba(147,50,27,.45); }
+  .hero .byline a:hover { color: var(--ox-bright); }
+  .hero .summary {
+    margin-top: 18px; max-width: 62ch; font-size: 18px; line-height: 1.55; color: var(--ink-soft);
+    border-left: 3px solid var(--ox); padding-left: 18px;
   }
 
   /* ---------- TOC ---------- */
@@ -226,7 +260,7 @@
   .stage:nth-child(2) .tag { background: var(--ox); }
   .stage:nth-child(3) .tag { background: var(--ox-bright); }
   .stage .body { padding: 20px 26px; }
-  .stage .body h4 { font-family: var(--display); font-weight: 600; font-size: 21px; margin-bottom: 6px; }
+  .stage .body h3 { font-family: var(--display); font-weight: 600; font-size: 21px; margin-bottom: 6px; }
   .stage .body p { font-size: 17px; color: var(--ink-soft); margin: 0; }
   @media (max-width: 640px) { .stage { grid-template-columns: 1fr; } .stage .tag { padding: 8px; } }
 
@@ -284,7 +318,7 @@
 <div id="progress"></div>
 
 <div class="masthead">
-  <span>TMP&nbsp;PRESS <span class="dot">●</span> ESSAY № 01</span>
+  <span><a href="https://zozo123.github.io/">Yossi Eliaz</a> <span class="dot">●</span> Essay № 01</span>
   <span><a href="course.html" style="color:inherit;text-decoration:none;">№ 02: THE 2027 SYLLABUS →</a></span>
 </div>
 
@@ -300,6 +334,8 @@
       sources: 40+, cited in margin
     </div>
   </div>
+  <p class="byline">By <a href="https://zozo123.github.io/">Yossi Eliaz</a> · June 2026 · researched with AI agents (see <a href="#colophon">Colophon</a>)</p>
+  <p class="summary">Summary: when AI agents become the main readers of data, the bottleneck moves from the model to governed definitions. Anthropic reports that on its internal evals an analytics agent with full data access but no curated context scored 21%, and above 95% once curated “skills” were added (Chapter II).</p>
 </header>
 
 <nav class="toc">
@@ -327,7 +363,7 @@
     <p>That assumption just expired. In May 2025, when Databricks paid roughly a billion dollars for Neon, a serverless Postgres startup, the acquisition came with a statistic that deserves to be remembered as the moment the era turned: <b>more than 80 percent of the databases provisioned on Neon were created by AI agents, not by humans.</b> Not queried by agents — <em>created</em> by them, as casually as a function allocates a variable.</p>
     <div class="note">CNBC, May 14 2025: Databricks acquires Neon for ~$1B; Ali Ghodsi cites the 80% agent-provisioned figure. <a href="https://www.cnbc.com/2025/05/14/databricks-is-buying-database-startup-neon-for-about-1-billion.html">cnbc.com</a></div>
 
-    <p>A month later, Anthropic published a blog post titled <em>“How Anthropic enables self-service data analytics with Claude,”</em> reporting that 95 percent of business analytics queries inside the company are now answered by an agent rather than a human analyst. A widely shared LinkedIn-style reading of that post concluded, with the confidence native to the genre, that this is why Databricks will “absolutely explode” over the next decade: agents need huge, analytic-ready, well-defined tables, Spark makes those tables cheaply, Unity Catalog governs their definitions, therefore Databricks is where the agents will get their data.</p>
+    <p>About a year later, in June 2026, Anthropic published a blog post titled <em>“How Anthropic enables self-service data analytics with Claude,”</em> reporting that 95 percent of business analytics queries inside the company are now answered by an agent rather than a human analyst. A widely shared LinkedIn-style reading of that post concluded, with the confidence native to the genre, that this is why Databricks will “absolutely explode” over the next decade: agents need huge, analytic-ready, well-defined tables, Spark makes those tables cheaply, Unity Catalog governs their definitions, therefore Databricks is where the agents will get their data.</p>
     <div class="note">Anthropic, June 3 2026. <a href="https://claude.com/blog/how-anthropic-enables-self-service-data-analytics-with-claude">claude.com/blog</a></div>
 
     <p>This essay takes that argument seriously — more seriously, in fact, than the post takes itself. Because hidden inside the cheerful vendor syllogism is a genuinely deep question, the kind Alex Petrov spent three hundred pages of <em>Database Internals</em> teaching us how to ask: when the client changes, which parts of the database are physics, and which parts are merely habit?</p>
@@ -469,15 +505,15 @@
     <div class="stages">
       <div class="stage">
         <div class="tag">Stage A</div>
-        <div class="body"><h4>Humans ask questions</h4><p>“What was revenue across product lines last year?” Text-to-SQL with a human checking each answer. Needs: discoverability, metadata, certified-table tiers. Most enterprises are here.</p></div>
+        <div class="body"><h3>Humans ask questions</h3><p>“What was revenue across product lines last year?” Text-to-SQL with a human checking each answer. Needs: discoverability, metadata, certified-table tiers. Most enterprises are here.</p></div>
       </div>
       <div class="stage">
         <div class="tag">Stage B</div>
-        <div class="body"><h4>Humans ask for judgment</h4><p>“What should we do to grow this product line?” The agent composes dozens of queries; humans review the conclusion, not the intermediate steps. Needs: trustworthy primitives — semantic layers, blessed rollups, lineage — because nobody audits query #37 of 60.</p></div>
+        <div class="body"><h3>Humans ask for judgment</h3><p>“What should we do to grow this product line?” The agent composes dozens of queries; humans review the conclusion, not the intermediate steps. Needs: trustworthy primitives — semantic layers, blessed rollups, lineage — because nobody audits query #37 of 60.</p></div>
       </div>
       <div class="stage">
         <div class="tag">Stage C</div>
-        <div class="body"><h4>Agents patrol the estate</h4><p>Thousands of standing agents continuously scanning, pushing findings before anyone asks. Needs: machine-scale workload isolation, non-human identity and audit, cost governance — and a feedback loop where confirmed and rejected findings train the next pass.</p></div>
+        <div class="body"><h3>Agents patrol the estate</h3><p>Thousands of standing agents continuously scanning, pushing findings before anyone asks. Needs: machine-scale workload isolation, non-human identity and audit, cost governance — and a feedback loop where confirmed and rejected findings train the next pass.</p></div>
       </div>
     </div>
 
@@ -526,7 +562,7 @@
 
     <p>The last human query will not be a SELECT statement. It will be the question we keep asking each other in the meeting after the agent presents its findings: <em>do we trust this number?</em> Everything in this essay — the catalogs, the semantic layers, the eval suites, the branches, the provenance footers — is infrastructure for answering yes.</p>
 
-    <p><b>Continued in <a href="course.html">Essay № 02: The 2027 Syllabus</a></b> — the graduate course this decade needs and no flagship university teaches yet, with field notes on what MIT, Harvard, CMU, Stanford, and Berkeley actually teach in 2026. And the syllabus is no longer hypothetical: <b><a href="course/">the full course site</a></b> has all fourteen weeks of lecture notes and four lab handouts, free and open.</p>
+    <p><b>Continued in <a href="course.html">Essay № 02: The 2027 Syllabus</a></b> — a proposed graduate course that no university offers, with field notes on what MIT, Harvard, CMU, Stanford, and Berkeley actually teach in 2026. The materials are on <b><a href="course/">the course site</a></b>: fourteen weeks of lecture notes and four lab handouts, drafted with AI agents, not yet taught, free and open.</p>
 
     <div class="fleuron">❦</div>
   </div>
@@ -564,7 +600,7 @@
 
 </article>
 
-<footer>
+<footer id="colophon">
   <div class="colophon">
     <div>
       <h3>Colophon</h3>
@@ -572,6 +608,7 @@
       <p>Dedicated to the proposition that the least glamorous discipline in software — data modeling — just became the most important one.</p>
     </div>
     <div class="specs">
+      <b>Author</b> — <a href="https://yossieliaz.netlify.app/">Yossi Eliaz</a> · <a href="https://zozo123.github.io/">more writing</a><br>
       <b>Type</b> — Fraunces · Newsreader · IBM Plex Mono<br>
       <b>Palette</b> — paper #F6F1E7 · ink #1D1A15 · oxblood #93321B<br>
       <b>Stack</b> — one HTML file, zero dependencies<br>

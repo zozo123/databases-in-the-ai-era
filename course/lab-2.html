@@ -6,6 +6,8 @@
 <title>Lab 2: Mini-Neon — Copy-on-Write Pages over Object Storage — DATA 2027</title>
 <meta name="description" content="Build a page layer over S3: WAL ingestion, GetPage@LSN, O(metadata) branching, and GC — then serve 50 concurrent agent branches from one parent.">
 <meta name="theme-color" content="#f6f1e7">
+<meta name="author" content="Yossi Eliaz">
+<link rel="canonical" href="https://zozo123.github.io/databases-in-the-ai-era/course/lab-2.html">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23f6f1e7'/%3E%3Cellipse cx='50' cy='28' rx='30' ry='12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 28v44c0 6.6 13.4 12 30 12s30-5.4 30-12V28' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 50c0 6.6 13.4 12 30 12s30-5.4 30-12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -302,7 +304,7 @@ func (ps *Pageserver) RunGC(ctx context.Context, horizon, idle,
 <footer class="site">
   <div class="inner">
     <span>DATA 2027 — a course that doesn’t exist yet · <a href="../index.html">Essay № 01</a> · <a href="../course.html">Essay № 02</a></span>
-    <span>CC BY 4.0 · built with <a href="https://claude.com/claude-code">Claude Code</a></span>
+    <span>By <a href="https://zozo123.github.io/">Yossi Eliaz</a> · CC BY 4.0 · built with <a href="https://claude.com/claude-code">Claude Code</a></span>
   </div>
 </footer>
 

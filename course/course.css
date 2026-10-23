@@ -127,6 +127,10 @@ th {
 }
 td { padding: 10px 14px; border-bottom: 1px solid var(--rule); vertical-align: top; }
 td code { white-space: nowrap; }
+/* narrow screens: wide tables scroll inside their own box, not the page */
+@media (max-width: 640px) {
+  table { display: block; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+}
 
 /* figures */
 figure { margin: 36px 0; border: 1px solid var(--ink); background: var(--paper-deep); padding: 26px; }

@@ -4,16 +4,38 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>DATA 2027: Data Systems in the Agentic Era — The Syllabus</title>
-<meta name="description" content="A graduate course that doesn't exist yet — but should. The lovechild of MIT 6.5830, Harvard CS265, CMU 15-721 and Stanford CS245, rebuilt for a world where AI agents are the dominant database clients. With field notes on what the real 2026 courses actually teach.">
+<meta name="description" content="Essay by Yossi Eliaz: a proposed graduate data-systems course for the agentic era. Draws on MIT 6.5830, Harvard CS265, CMU 15-721 and Stanford CS245, with field notes on what they teach in 2026.">
+<meta name="author" content="Yossi Eliaz">
 <meta property="og:title" content="DATA 2027: Data Systems in the Agentic Era">
 <meta property="og:description" content="The 2027 syllabus: 14 weeks, 4 labs, 8 final projects, 5 exam questions — for the workload regime change nobody's flagship course teaches yet.">
 <meta property="og:type" content="article">
+<meta property="og:url" content="https://zozo123.github.io/databases-in-the-ai-era/course.html">
 <meta property="og:image" content="https://zozo123.github.io/databases-in-the-ai-era/og.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="theme-color" content="#f6f1e7">
 <link rel="canonical" href="https://zozo123.github.io/databases-in-the-ai-era/course.html">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Article",
+  "headline": "The 2027 Syllabus: DATA 2027, Data Systems in the Agentic Era",
+  "description": "A proposed graduate data-systems course for the agentic era, with field notes on what flagship database courses teach in 2026. The course is not offered at any university.",
+  "url": "https://zozo123.github.io/databases-in-the-ai-era/course.html",
+  "mainEntityOfPage": "https://zozo123.github.io/databases-in-the-ai-era/course.html",
+  "image": "https://zozo123.github.io/databases-in-the-ai-era/og.png",
+  "datePublished": "2026-06-10",
+  "inLanguage": "en",
+  "license": "https://creativecommons.org/licenses/by/4.0/",
+  "author": {
+    "@type": "Person",
+    "name": "Yossi Eliaz",
+    "url": "https://yossieliaz.netlify.app/",
+    "sameAs": ["https://github.com/zozo123", "https://www.linkedin.com/in/yossi-eliaz/"]
+  }
+}
+</script>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23f6f1e7'/%3E%3Cellipse cx='50' cy='28' rx='30' ry='12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 28v44c0 6.6 13.4 12 30 12s30-5.4 30-12V28' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3Cpath d='M20 50c0 6.6 13.4 12 30 12s30-5.4 30-12' fill='none' stroke='%2393321b' stroke-width='7'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -55,6 +77,7 @@
   .masthead .dot { color: var(--ox); }
   .masthead a { color: var(--ink-faint); text-decoration: none; }
   .masthead a:hover { color: var(--ox-bright); }
+  @media (max-width: 600px) { .masthead { flex-direction: column; gap: .4rem; } }
 
   .hero { max-width: 1100px; margin: 0 auto; padding: 9vh 24px 7vh; border-bottom: 1px solid var(--ink); }
   .hero .kicker {
@@ -100,7 +123,7 @@
   .ch-body { display: grid; grid-template-columns: minmax(0, 62ch) minmax(180px, 1fr); gap: 0 64px; }
   .ch-body > * { grid-column: 1; }
   .ch-body p { margin-bottom: 1.45em; }
-  @media (max-width: 900px) { .ch-body { grid-template-columns: 1fr; } }
+  @media (max-width: 900px) { .ch-body { grid-template-columns: minmax(0, 1fr); } }
   p.opener::first-letter {
     font-family: var(--display); font-weight: 900; color: var(--ox);
     font-size: 4.4em; line-height: .78; float: left; padding: .07em .12em 0 0;
@@ -175,6 +198,7 @@
   .row .yr { font-family: var(--display); font-weight: 900; font-size: 26px; color: var(--ox); }
   .row .txt { font-size: 18px; line-height: 1.55; }
   .row .txt b { font-family: var(--display); font-weight: 600; }
+  @media (max-width: 600px) { .row { grid-template-columns: 40px minmax(0,1fr); gap: 12px; } .row > * { min-width: 0; overflow-wrap: anywhere; } }
 
   /* grading bar */
   .grade-bar { grid-column: 1 / -1; margin: 40px 0; }
@@ -217,7 +241,7 @@
 <div id="progress"></div>
 
 <div class="masthead">
-  <span>TMP&nbsp;PRESS <span class="dot">●</span> ESSAY № 02 — A SYLLABUS</span>
+  <span><a href="https://zozo123.github.io/">Yossi Eliaz</a> <span class="dot">●</span> Essay № 02 — A Syllabus</span>
   <span><a href="index.html">← № 01: THE ESSAY</a></span>
 </div>
 
@@ -225,10 +249,10 @@
   <div class="kicker">A Course That Doesn’t Exist Yet</div>
   <h1>The 2027 <em>Syllabus</em></h1>
   <div class="standfirst">
-    <p><b>DATA 2027: Data Systems in the Agentic Era.</b> The lovechild of MIT 6.5830, Harvard CS265, CMU 15-721 and Stanford CS245 — rebuilt for a world where the database’s dominant client is a model. Preceded by field notes on what the real flagship courses actually teach in 2026, and the gap they leave open. <b>The full course — 14 weeks of lecture notes and all four lab handouts — is now live at <a href="course/" style="color:#93321b;border-bottom:1px solid #93321b;text-decoration:none;">the course site →</a></b></p>
+    <p><b>DATA 2027: Data Systems in the Agentic Era.</b> Draws on MIT 6.5830, Harvard CS265, CMU 15-721 and Stanford CS245, redesigned for a world where the database’s dominant client is a model. Preceded by field notes on what the real flagship courses actually teach in 2026, and the gap they leave open. <b>The full course — 14 weeks of lecture notes and all four lab handouts — is now live at <a href="course/" style="color:#93321b;border-bottom:1px solid #93321b;text-decoration:none;">the course site →</a></b></p>
     <div class="meta">
-      <b>cross-listed (hypothetically)</b><br>
-      MIT 6.5837 · Stanford CS 345A · Harvard CS 2650<br>
+      <b>independent course design</b><br>
+      not offered at any university<br>
       12 units · spring 2027 · 14 weeks<br>
       4 labs · 8 final projects · 5 exam questions
     </div>
@@ -296,7 +320,7 @@
       <cite>— Michael Stonebraker, 2025 year-in-review interview; his DBOS project has pivoted to durable execution for “crashproof AI agents”</cite>
     </blockquote>
 
-    <p>Zero on MIT’s warehouse; ninety-five percent at Anthropic with curated context. The entire pedagogy of the agentic era lives in the space between those two numbers — and no course on Earth currently teaches students how to cross it.</p>
+    <p>Zero on MIT’s warehouse; ninety-five percent at Anthropic with curated context. The entire pedagogy of the agentic era lives in the space between those two numbers — and none of the five courses surveyed above teaches students how to cross it end to end.</p>
   </div>
 </section>
 
@@ -310,7 +334,7 @@
 
     <div class="spec-sheet">
       <div class="title-row">
-        <div class="cnum">MIT 6.5837 · Stanford CS 345A · Harvard CS 2650 — Spring 2027</div>
+        <div class="cnum">Independent course design by Yossi Eliaz · not offered at any university</div>
         <h3>DATA 2027: Data Systems in the Agentic Era</h3>
       </div>
       <div class="spec-grid">
@@ -496,7 +520,7 @@
 
     <div class="pull">Database courses teach the system; ML courses teach the model. <b>Nobody teaches the interface</b> — which is where the next decade of both fields will be decided.</div>
 
-    <p>Why this course exists: the agent era is producing a generation of engineers who treat the database as a vibes-based retrieval API, and a generation of database researchers who treat LLMs as a noisy UDF. Both are wrong, and the cost of being wrong is measured in hallucinated joins shipped to production and in storage engines optimized for clients that no longer exist. This course exists to produce people who can hold Petrov’s page layouts and a transformer’s context window in their head at the same time — because the systems that win the agentic era will be built by exactly those people, and there are currently about two hundred of them on Earth.</p>
+    <p>Why this course exists: the agent era is producing a generation of engineers who treat the database as a vibes-based retrieval API, and a generation of database researchers who treat LLMs as a noisy UDF. Both are wrong, and the cost of being wrong is measured in hallucinated joins shipped to production and in storage engines optimized for clients that no longer exist. This course exists to produce people who can hold Petrov’s page layouts and a transformer’s context window in their head at the same time — because the systems that win the agentic era will be built by exactly those people, and there are not many of them yet.</p>
   </div>
 </section>
 
@@ -559,6 +583,7 @@
       <p>If you teach a database course and want to steal any of this: please do. That is the point. P8 especially.</p>
     </div>
     <div class="specs">
+      <b>Author</b> — <a href="https://yossieliaz.netlify.app/">Yossi Eliaz</a> · <a href="https://zozo123.github.io/">more writing</a><br>
       <b>Type</b> — Fraunces · Newsreader · IBM Plex Mono<br>
       <b>Palette</b> — paper #F6F1E7 · ink #1D1A15 · oxblood #93321B<br>
       <b>Stack</b> — one HTML file, zero dependencies<br>

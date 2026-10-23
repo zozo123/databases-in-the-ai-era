@@ -1,8 +1,8 @@
 # Databases in the Age of AI
 
-[![lab-materials CI](https://github.com/zozo123/databases-in-the-ai-era/actions/workflows/labs.yml/badge.svg)](https://github.com/zozo123/databases-in-the-ai-era/actions/workflows/labs.yml)
+Two essays by [Yossi Eliaz](https://zozo123.github.io/) and AI-drafted open course materials (DATA 2027) for a graduate data-systems course in the agentic era. The course is not offered at any university and has not yet been taught; review before teaching.
 
-Two essays and a complete, free graduate database course for the agentic era. All four labs' starter materials are CI-tested on every push (cargo test, go vet/build, DuckDB schema + 50 gold queries + grader self-test, deterministic data-gen + operator smoke test).
+All four labs' starter materials are CI-tested on every push (cargo test, go vet/build, DuckDB schema + 50 gold queries + grader self-test, deterministic data-gen + operator smoke test). [![lab-materials CI](https://github.com/zozo123/databases-in-the-ai-era/actions/workflows/labs.yml/badge.svg)](https://github.com/zozo123/databases-in-the-ai-era/actions/workflows/labs.yml)
 
 **Start here:** https://zozo123.github.io/databases-in-the-ai-era/
 
@@ -16,7 +16,7 @@ Field notes on what the real flagship courses (MIT 6.5830, Harvard CS265, CMU 15
 
 ## The course — [DATA 2027: Data Systems in the Agentic Era](https://zozo123.github.io/databases-in-the-ai-era/course/)
 
-Complete open courseware:
+Open course materials, drafted with AI agents (see Provenance):
 
 - **14 weeks of lecture notes** (~53k words): two lectures per week with worked math, SVG figures, field notes, readings, and exercises
 - **14 slide decks** (423 slides): keyboard-navigable single-file HTML, generated from the notes; `p` prints
@@ -34,4 +34,4 @@ Researched and written by ~45 parallel AI agents across four workflow waves, syn
 
 Single-purpose static site, zero dependencies. Type: Fraunces · Newsreader · IBM Plex Mono.
 
-License: CC BY 4.0 · Built with [Claude Code](https://claude.com/claude-code)
+By [Yossi Eliaz](https://yossieliaz.netlify.app/) · more writing at [zozo123.github.io](https://zozo123.github.io/) · License: CC BY 4.0 · Built with [Claude Code](https://claude.com/claude-code)
