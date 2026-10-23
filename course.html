@@ -96,6 +96,7 @@
   .standfirst p { font-size: clamp(20px, 2.2vw, 26px); line-height: 1.45; font-weight: 500; text-wrap: balance; }
   .standfirst .meta { font-family: var(--mono); font-size: 12.5px; line-height: 2.1; color: var(--ink-soft); text-align: right; }
   .standfirst .meta b { color: var(--ink); font-weight: 600; }
+  .standfirst a.course-link { color: var(--ox); border-bottom: 1px solid var(--ox); text-decoration: none; }
   @media (max-width: 760px) { .hero .standfirst { grid-template-columns: 1fr; } .standfirst .meta { text-align: left; } }
 
   nav.toc {
@@ -250,7 +251,7 @@
   <div class="kicker">A Course That Doesn’t Exist Yet</div>
   <h1>The 2027 <em>Syllabus</em></h1>
   <div class="standfirst">
-    <p><b>DATA 2027: Data Systems in the Agentic Era.</b> Draws on MIT 6.5830, Harvard CS265, CMU 15-721 and Stanford CS245, redesigned for a world where the database’s dominant client is a model. Preceded by field notes on what the real flagship courses actually teach in 2026, and the gap they leave open. <b>The full course — 14 weeks of lecture notes and all four lab handouts — is now live at <a href="course/" style="color:#93321b;border-bottom:1px solid #93321b;text-decoration:none;">the course site →</a></b></p>
+    <p><b>DATA 2027: Data Systems in the Agentic Era.</b> Draws on MIT 6.5830, Harvard CS265, CMU 15-721 and Stanford CS245, redesigned for a world where the database’s dominant client is a model. Preceded by field notes on what the real flagship courses actually teach in 2026, and the gap they leave open. <b>The full course — 14 weeks of lecture notes and all four lab handouts — is now live at <a href="course/" class="course-link">the course site →</a></b></p>
     <div class="meta">
       <b>independent course design</b><br>
       not offered at any university<br>
@@ -553,7 +554,7 @@
     <h2>Sources &amp; Provenance</h2>
   </div>
   <div class="ch-body">
-    <ul class="sources" style="grid-column: 1 / -1;">
+    <ul class="sources">
       <li><span class="k">[01]</span> MIT 6.5830 Spring 2026 — <a href="https://dsg.csail.mit.edu/6.5830/">course site</a>, <a href="https://dsg.csail.mit.edu/6.5830/sched.php">lecture schedule</a> (Lec 17 Vector DB, Lec 22 Semantic Operators); instructors Cafarella &amp; Li.</li>
       <li><span class="k">[02]</span> Harvard CS265 “Big Data &amp; AI Systems,” Spring 2026, Idreos — <a href="http://daslab.seas.harvard.edu/classes/cs265/">site</a>, <a href="http://daslab.seas.harvard.edu/classes/cs265/files/syllabus.pdf">syllabus</a>; CS165 Fall 2025 — <a href="http://daslab.seas.harvard.edu/classes/cs165/">site</a>.</li>
       <li><span class="k">[03]</span> CMU 15-445/645 Spring 2026 — <a href="https://15445.courses.cs.cmu.edu/spring2026/syllabus.html">syllabus</a> (vector indexes in intro indexing); 15-721 Fall 2025 (Patel) — <a href="https://www.cs.cmu.edu/~15721-f25/">site</a>.</li>

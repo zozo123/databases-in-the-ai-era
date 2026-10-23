@@ -320,7 +320,7 @@
 
 <div class="masthead">
   <span><a href="https://zozo123.github.io/">Yossi Eliaz</a> <span class="dot">●</span> Essay № 01</span>
-  <span><a href="course.html" style="color:inherit;text-decoration:none;">№ 02: THE 2027 SYLLABUS →</a></span>
+  <span><a href="course.html">№ 02: THE 2027 SYLLABUS →</a></span>
 </div>
 
 <header class="hero">
@@ -428,7 +428,7 @@
     <p>None of that is repealed by intelligence. An agent issuing ten thousand writes per second through Raft pays the same quorum round-trip a human application pays. S3 is exactly as far from RAM no matter how eloquent the client. What the AI era does instead is more interesting: it adds new access methods to Petrov’s taxonomy, promotes old footnotes to headlines, and shifts the workload’s center of gravity.</p>
 
     <p><b>The new access method.</b> Petrov’s index chapters cover B-trees, LSM-trees, and hashing. The AI era adds a fourth first-class citizen: the approximate nearest-neighbor index — HNSW’s navigable small-world graphs, IVF with product quantization, and DiskANN, whose entire contribution is a deeply Petrovian move: re-imposing disk-friendly layout on a graph structure so a billion vectors fit on one node’s SSD. Vector indexes obey the old trade-off triangle conspicuously — HNSW is read-fast and memory-gluttonous, IVF trades recall for space — but they add something genuinely new: <em>a recall axis</em>. For the first time, correctness itself became a tunable parameter of the access method. And in production, vector indexes are converging on LSM-like segment-and-merge architectures with tombstoned deletes. It is Chapter 7 of Petrov, with cosine distance.</p>
-    <div class="note">HNSW: Malkov & Yashunin, 2016. DiskANN: Subramanya et al., NeurIPS 2019. Now native in SQL Server 2025, Oracle 23ai, MongoDB Atlas, Elastic, pgvector.</div>
+    <div class="note">HNSW: Malkov &amp; Yashunin, 2016. DiskANN: Subramanya et al., NeurIPS 2019. Now native in SQL Server 2025, Oracle 23ai, MongoDB Atlas, Elastic, pgvector.</div>
 
     <p><b>The confession.</b> Learned indexes — Kraska, Beutel, Dean and Polyzotis’s 2018 “The Case for Learned Index Structures,” refined by ALEX and the PGM-index — replace B-tree internals with a model of the key distribution’s CDF. Their practical wins remain narrow: read-mostly, in-memory, sorted numeric data. But their conceptual contribution is permanent. A B-tree was always an implicit statistical model of your data; learned indexes merely make it confess. The deeper agents reach into databases, the more the index, the optimizer, and the cache reveal themselves as what they always were — machine learning with worse marketing.</p>
 
@@ -576,7 +576,7 @@
     <h2>Sources &amp; Provenance</h2>
   </div>
   <div class="ch-body">
-    <ul class="sources" style="grid-column: 1 / -1;">
+    <ul class="sources">
       <li><span class="k">[01]</span> Anthropic, <a href="https://claude.com/blog/how-anthropic-enables-self-service-data-analytics-with-claude">“How Anthropic enables self-service data analytics with Claude”</a>, June 3 2026. All accuracy, decay, and ablation figures.</li>
       <li><span class="k">[02]</span> Petrov, A., <i>Database Internals: A Deep Dive into How Distributed Data Systems Work</i>, O’Reilly, 2019.</li>
       <li><span class="k">[03]</span> Lei et al., <a href="https://arxiv.org/abs/2411.07763">“Spider 2.0: Evaluating Language Models on Real-World Enterprise Text-to-SQL Workflows”</a>, ICLR 2025; leaderboard at <a href="https://spider2-sql.github.io/">spider2-sql.github.io</a>.</li>
